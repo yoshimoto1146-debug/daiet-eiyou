@@ -1,10 +1,13 @@
 import React, { useState, useRef } from 'react';
-import { Camera, Plus, CheckCircle2, Flame, User, Utensils, MessageSquare, ArrowRight, Upload, FileText, X, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { Camera, Plus, CheckCircle2, Flame, User, Utensils, MessageSquare, ArrowRight, Upload, FileText, X, Sparkles, Image as ImageIcon, Trash2, Edit2 } from 'lucide-react';
 
-// ユーザープロファイルの型定義
+// 時間区分の型定義
+type MealCategory = '朝食' | '昼食' | '夕食' | '間食';
+
+// 食事アイテムの型定義
 interface MealItem {
   id: string;
-  time: string;
+  category: MealCategory;
   name: string;
   calories: number;
   p: number;
@@ -27,7 +30,7 @@ interface UserProfile {
   adviceMessage: string;
 }
 
-// 初期ユーザーデータ（例：会員様2名分）
+// 初期ユーザーデータ
 const INITIAL_USERS: Record<string, UserProfile> = {
   userA: {
     id: 'userA',
@@ -41,9 +44,9 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetF: 35,
     targetC: 235,
     todayMeals: [
-      { id: 'm1', time: '08:00', name: '朝食: 鮭塩焼き・玄米ご飯・味噌汁', calories: 420, p: 28, f: 10, c: 55 },
-      { id: 'm2', time: '12:30', name: '昼食: 蒸し鶏と彩り野菜のサラダボウル', calories: 480, p: 35, f: 12, c: 58 },
-      { id: 'm3', time: '15:30', name: '間食: ギリシャヨーグルト・素焼きアーモンド', calories: 150, p: 12, f: 5, c: 12 },
+      { id: 'm1', category: '朝食', name: '鮭塩焼き・玄米ご飯・味噌汁', calories: 420, p: 28, f: 10, c: 55 },
+      { id: 'm2', category: '昼食', name: '蒸し鶏と彩り野菜のサラダボウル', calories: 480, p: 35, f: 12, c: 58 },
+      { id: 'm3', category: '間食', name: 'ギリシャヨーグルト・素焼きアーモンド', calories: 150, p: 12, f: 5, c: 12 },
     ],
     adviceMessage: '佐藤様は脂質代謝低下タイプです。夕食の脂質を抑えられており非常に素晴らしい進捗です！夜間はPFCのうちタンパク質を意識して補給してください。',
   },
@@ -59,8 +62,8 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetF: 55,
     targetC: 270,
     todayMeals: [
-      { id: 'm5', time: '07:30', name: '朝食: プロテイン・オートミールボウル', calories: 450, p: 35, f: 8, c: 60 },
-      { id: 'm6', time: '12:00', name: '昼食: 牛肉赤身ステーキ定食（ご飯少なめ）', calories: 750, p: 48, f: 28, c: 75 },
+      { id: 'm5', category: '朝食', name: 'プロテイン・オートミールボウル', calories: 450, p: 35, f: 8, c: 60 },
+      { id: 'm6', category: '昼食', name: '牛肉赤身ステーキ定食（ご飯少なめ）', calories: 750, p: 48, f: 28, c: 75 },
     ],
     adviceMessage: '田中様は糖質タイプです。本日の炭水化物は目標範囲内に抑えられています。食後の軽いウォーキングで血糖値の上昇を抑制しましょう！',
   },
@@ -76,13 +79,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'image' | 'text'>('image');
   const [pastedText, setPastedText] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<MealCategory>('昼食');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<MealItem | null>(null);
+
+  // 編集モーダル用の状態
+  const [editingMeal, setEditingMeal] = useState<MealItem | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentUser = users[selectedUserId];
 
-  // 合計カロリー・PFC動的計算
+  // 動的計算
   const currentCalories = currentUser.todayMeals.reduce((acc, m) => acc + m.calories, 0);
   const currentP = currentUser.todayMeals.reduce((acc, m) => acc + m.p, 0);
   const currentF = currentUser.todayMeals.reduce((acc, m) => acc + m.f, 0);
@@ -99,43 +106,37 @@ export default function App() {
     showToast(`「${users[newUserId].name} 様」に切り替えました`);
   };
 
-  // 画像アップロード処理
+  // 画像選択処理
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedImage(reader.result as string);
-      };
+      reader.onloadend = () => setSelectedImage(reader.result as string);
       reader.readAsDataURL(file);
     }
   };
 
-  // AI解析実行（テキスト/スクショ共通）
+  // AI解析実行
   const runAiAnalysis = () => {
     if (activeTab === 'image' && !selectedImage) {
-      alert('LINEのスクリーンショットまたは食事画像を選択してください');
+      alert('画像を選択してください');
       return;
     }
     if (activeTab === 'text' && !pastedText.trim()) {
-      alert('LINEの文章を貼り付けてください');
+      alert('文章を入力してください');
       return;
     }
 
     setIsAnalyzing(true);
     setAnalysisResult(null);
 
-    // AI解析のシミュレーション（1.5秒後に結果生成）
     setTimeout(() => {
       setIsAnalyzing(false);
-      const now = new Date();
-      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
       if (activeTab === 'text') {
         setAnalysisResult({
           id: `ai-${Date.now()}`,
-          time: timeStr,
-          name: `LINE送信内容: ${pastedText.slice(0, 18)}...`,
+          category: selectedCategory,
+          name: `解析: ${pastedText.slice(0, 15)}...`,
           calories: 520,
           p: 32,
           f: 14,
@@ -144,22 +145,21 @@ export default function App() {
       } else {
         setAnalysisResult({
           id: `ai-${Date.now()}`,
-          time: timeStr,
-          name: 'LINE画像解析: 豚の生姜焼き定食・小鉢',
+          category: selectedCategory,
+          name: '解析: 豚生姜焼き定食・小鉢セット',
           calories: 680,
           p: 38,
           f: 22,
           c: 78,
         });
       }
-      showToast('AI解析が完了しました！');
-    }, 1500);
+      showToast('AI解析が完了しました');
+    }, 1200);
   };
 
-  // 解析結果を食事ログに追加
+  // 食事追加
   const saveAnalyzedMeal = () => {
     if (!analysisResult) return;
-
     setUsers((prev) => ({
       ...prev,
       [selectedUserId]: {
@@ -167,16 +167,42 @@ export default function App() {
         todayMeals: [...prev[selectedUserId].todayMeals, analysisResult],
       },
     }));
-
-    showToast(`「${analysisResult.name}」を食事ログに追加しました！`);
-    // モーダル初期化＆リセット
+    showToast('食事ログに追加しました');
     setIsAiModalOpen(false);
     setSelectedImage(null);
     setPastedText('');
     setAnalysisResult(null);
   };
 
-  // カロリーおよびPFC計算率
+  // 食事削除
+  const handleDeleteMeal = (mealId: string) => {
+    if (window.confirm('この食事データを削除してよろしいですか？')) {
+      setUsers((prev) => ({
+        ...prev,
+        [selectedUserId]: {
+          ...prev[selectedUserId],
+          todayMeals: prev[selectedUserId].todayMeals.filter((m) => m.id !== mealId),
+        },
+      }));
+      showToast('データを削除しました');
+    }
+  };
+
+  // 食事編集保存
+  const handleSaveEdit = () => {
+    if (!editingMeal) return;
+    setUsers((prev) => ({
+      ...prev,
+      [selectedUserId]: {
+        ...prev[selectedUserId],
+        todayMeals: prev[selectedUserId].todayMeals.map((m) => (m.id === editingMeal.id ? editingMeal : m)),
+      },
+    }));
+    setEditingMeal(null);
+    showToast('修正内容を更新しました');
+  };
+
+  // 達成度％
   const calPercent = Math.min(Math.round((currentCalories / currentUser.targetCalories) * 100), 100);
   const pPercent = Math.min(Math.round((currentP / currentUser.targetP) * 100), 100);
   const fPercent = Math.min(Math.round((currentF / currentUser.targetF) * 100), 100);
@@ -205,7 +231,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* ユーザー切り替え */}
           <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
             <User className="w-4 h-4 text-emerald-600 ml-1" />
             <select
@@ -220,9 +245,9 @@ export default function App() {
         </div>
       </header>
 
-      {/* メインエリア */}
+      {/* メイン */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6 space-y-6">
-        {/* ユーザープロフィールバー */}
+        {/* プロフィール */}
         <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-3xl p-6 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
@@ -236,19 +261,17 @@ export default function App() {
             <h2 className="text-2xl font-black text-white mt-2">{currentUser.name} 様の分析ダッシュボード</h2>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setIsAiModalOpen(true)}
-              className="px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2"
-            >
-              <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-              <span>LINEスクショ/文章 AI解析</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setIsAiModalOpen(true)}
+            className="px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>LINEスクショ/文章 AI解析</span>
+          </button>
         </div>
 
-        {/* PFC＆カロリー指標 */}
+        {/* PFC・カロリー */}
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
           <div className="flex justify-between items-center pb-3 border-b border-slate-100">
             <h3 className="font-bold text-slate-800 text-base">本日の摂取状況＆PFC目標達成度</h3>
@@ -256,7 +279,7 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {/* カロリーカード */}
+            {/* カロリー */}
             <div className="bg-slate-900 text-white p-5 rounded-2xl flex flex-col justify-between shadow-inner">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-400">総摂取カロリー</span>
@@ -280,7 +303,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* PFC 3項目 */}
+            {/* PFC */}
             <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* P */}
               <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-2xl flex flex-col justify-between">
@@ -336,39 +359,69 @@ export default function App() {
           </div>
         </div>
 
-        {/* 食事履歴リスト */}
+        {/* 食事ログ（修正・削除可能） */}
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-4">
-          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-            <Utensils className="w-5 h-5 text-emerald-600" />
-            <h3 className="font-bold text-slate-800 text-base">{currentUser.name} 様の本日ログ一覧</h3>
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <Utensils className="w-5 h-5 text-emerald-600" />
+              <h3 className="font-bold text-slate-800 text-base">{currentUser.name} 様の本日ログ</h3>
+            </div>
+            <span className="text-xs text-slate-400 font-bold">{currentUser.todayMeals.length} 件録</span>
           </div>
 
           <div className="space-y-2">
-            {currentUser.todayMeals.map((meal) => (
-              <div
-                key={meal.id}
-                className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200/60 hover:bg-slate-100 transition-all gap-2"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-bold text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shrink-0">
-                    {meal.time}
-                  </span>
-                  <span className="text-xs font-bold text-slate-800">{meal.name}</span>
-                </div>
-                <div className="flex items-center gap-4 text-xs font-medium text-slate-600 self-end sm:self-auto">
-                  <span className="font-black text-slate-800">{meal.calories} kcal</span>
-                  <div className="flex gap-2 text-[11px]">
-                    <span className="text-indigo-600">P:{meal.p}g</span>
-                    <span className="text-amber-600">F:{meal.f}g</span>
-                    <span className="text-emerald-600">C:{meal.c}g</span>
+            {currentUser.todayMeals.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6">本日の食事ログはまだありません</p>
+            ) : (
+              currentUser.todayMeals.map((meal) => (
+                <div
+                  key={meal.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-all gap-2"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-emerald-800 bg-emerald-100/80 px-2.5 py-1 rounded-lg shrink-0">
+                      {meal.category}
+                    </span>
+                    <span className="text-xs font-bold text-slate-800">{meal.name}</span>
+                  </div>
+
+                  <div className="flex items-center gap-4 text-xs font-medium text-slate-600 justify-between sm:justify-end">
+                    <div className="flex items-center gap-3">
+                      <span className="font-black text-slate-800">{meal.calories} kcal</span>
+                      <div className="flex gap-2 text-[11px]">
+                        <span className="text-indigo-600 font-bold">P:{meal.p}g</span>
+                        <span className="text-amber-600 font-bold">F:{meal.f}g</span>
+                        <span className="text-emerald-600 font-bold">C:{meal.c}g</span>
+                      </div>
+                    </div>
+
+                    {/* 編集・削除ボタン */}
+                    <div className="flex items-center gap-1 border-l border-slate-200 pl-3">
+                      <button
+                        type="button"
+                        onClick={() => setEditingMeal(meal)}
+                        className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                        title="修正"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteMeal(meal.id)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                        title="削除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 
-        {/* LINEアドバイス生成機能 */}
+        {/* LINE指導 */}
         <div className="p-6 rounded-3xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -393,40 +446,57 @@ export default function App() {
         </div>
       </main>
 
-      {/* LINEスクショ＆文章 AI解析モーダル */}
+      {/* AI解析モーダル */}
       {isAiModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-emerald-600" />
-                <h3 className="font-black text-slate-800 text-lg">LINE食事内容 AI自動解析</h3>
+                <h3 className="font-black text-slate-800 text-lg">LINE食事内容 AI解析</h3>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsAiModalOpen(false)}
-                className="p-1 rounded-full text-slate-400 hover:bg-slate-100"
-              >
+              <button type="button" onClick={() => setIsAiModalOpen(false)} className="p-1 rounded-full text-slate-400 hover:bg-slate-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* タブ切り替え */}
+            {/* 時間区分選択（朝食・昼食・夕食・間食） */}
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">時間区分を選択:</label>
+              <div className="grid grid-cols-4 gap-2">
+                {(['朝食', '昼食', '夕食', '間食'] as MealCategory[]).map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`py-2 rounded-xl text-xs font-bold transition-all border ${
+                      selectedCategory === cat
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* タブ */}
             <div className="flex bg-slate-100 p-1 rounded-2xl text-xs font-bold">
               <button
                 type="button"
                 onClick={() => setActiveTab('image')}
-                className={`flex-1 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all ${
+                className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-2 transition-all ${
                   activeTab === 'image' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
                 }`}
               >
                 <ImageIcon className="w-4 h-4" />
-                <span>LINEスクショ / 写真</span>
+                <span>LINEスクショ/画像</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('text')}
-                className={`flex-1 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all ${
+                className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-2 transition-all ${
                   activeTab === 'text' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
                 }`}
               >
@@ -435,107 +505,176 @@ export default function App() {
               </button>
             </div>
 
-            {/* タブ1: 画像アップロード */}
+            {/* 画像 */}
             {activeTab === 'image' && (
               <div className="space-y-3">
-                <input
-                  type="file"
-                  accept="image/*"
-                  ref={fileInputRef}
-                  onChange={handleImageChange}
-                  className="hidden"
-                />
+                <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} className="hidden" />
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-300 rounded-2xl p-6 text-center cursor-pointer hover:border-emerald-500 hover:bg-emerald-50/30 transition-all flex flex-col items-center justify-center min-h-[160px]"
+                  className="border-2 border-dashed border-slate-300 rounded-2xl p-6 text-center cursor-pointer hover:border-emerald-500 hover:bg-emerald-50/30 transition-all flex flex-col items-center justify-center min-h-[140px]"
                 >
                   {selectedImage ? (
-                    <div className="relative w-full h-40">
-                      <img src={selectedImage} alt="選択画像" className="w-full h-full object-contain rounded-lg" />
-                      <span className="absolute bottom-1 right-1 bg-slate-900/80 text-white text-[10px] px-2 py-0.5 rounded">タップして変更</span>
-                    </div>
+                    <img src={selectedImage} alt="選択画像" className="max-h-36 object-contain rounded-lg" />
                   ) : (
                     <>
                       <Upload className="w-8 h-8 text-slate-400 mb-2" />
-                      <p className="text-xs font-bold text-slate-700">クリックしてLINEのスクショ・画像を選択</p>
-                      <p className="text-[10px] text-slate-400 mt-1">PNG, JPGファイルに対応</p>
+                      <p className="text-xs font-bold text-slate-700">クリックしてLINEスクショ・画像を選択</p>
                     </>
                   )}
                 </div>
               </div>
             )}
 
-            {/* タブ2: テキスト貼り付け */}
+            {/* テキスト */}
             {activeTab === 'text' && (
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-700 block">LINEで送られてきたテキストを貼り付け:</label>
-                <textarea
-                  rows={4}
-                  value={pastedText}
-                  onChange={(e) => setPastedText(e.target.value)}
-                  placeholder="例：今日のお昼は「サバの塩焼き定食、ごはん普通盛り、お味噌汁」を食べました！"
-                  className="w-full p-3.5 border border-slate-300 rounded-2xl text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                ></textarea>
-              </div>
+              <textarea
+                rows={3}
+                value={pastedText}
+                onChange={(e) => setPastedText(e.target.value)}
+                placeholder="例：お昼にサバの塩焼き定食とごはん普通盛りを食べました！"
+                className="w-full p-3.5 border border-slate-300 rounded-2xl text-xs outline-none focus:border-emerald-500"
+              ></textarea>
             )}
 
-            {/* 解析実行ボタン */}
+            {/* 解析ボタン */}
             {!analysisResult && (
               <button
                 type="button"
                 onClick={runAiAnalysis}
                 disabled={isAnalyzing}
-                className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {isAnalyzing ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>AIがカロリー＆PFCを解析中...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4 text-amber-300" />
-                    <span>AI解析を実行する</span>
-                  </>
-                )}
+                {isAnalyzing ? 'AI解析中...' : 'AI解析を実行する'}
               </button>
             )}
 
-            {/* 解析結果プレビュー＆追加 */}
+            {/* 解析プレビュー */}
             {analysisResult && (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3 animate-in fade-in duration-300">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-emerald-900 bg-emerald-200/60 px-2.5 py-1 rounded-md">
-                    AI解析完了
+                    【{analysisResult.category}】解析結果
                   </span>
-                  <span className="text-xs font-bold text-slate-600">{analysisResult.calories} kcal</span>
+                  <span className="text-xs font-bold text-slate-800">{analysisResult.calories} kcal</span>
                 </div>
                 <p className="text-xs font-bold text-slate-800">{analysisResult.name}</p>
                 <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold">
-                  <div className="bg-white p-2 rounded-xl border border-emerald-100">
-                    <span className="text-[10px] text-indigo-600 block">P (タンパク質)</span>
-                    <span className="text-slate-800">{analysisResult.p}g</span>
-                  </div>
-                  <div className="bg-white p-2 rounded-xl border border-emerald-100">
-                    <span className="text-[10px] text-amber-600 block">F (脂質)</span>
-                    <span className="text-slate-800">{analysisResult.f}g</span>
-                  </div>
-                  <div className="bg-white p-2 rounded-xl border border-emerald-100">
-                    <span className="text-[10px] text-emerald-600 block">C (炭水化物)</span>
-                    <span className="text-slate-800">{analysisResult.c}g</span>
-                  </div>
+                  <div className="bg-white p-2 rounded-xl">P: {analysisResult.p}g</div>
+                  <div className="bg-white p-2 rounded-xl">F: {analysisResult.f}g</div>
+                  <div className="bg-white p-2 rounded-xl">C: {analysisResult.c}g</div>
                 </div>
-
                 <button
                   type="button"
                   onClick={saveAnalyzedMeal}
-                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-1.5"
+                  className="w-full py-3 rounded-xl bg-slate-900 text-white font-bold text-xs flex items-center justify-center gap-1.5"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>この食事データを本日のログに追加</span>
+                  <span>この食事ログを追加する</span>
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 手動修正モーダル */}
+      {editingMeal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-black text-slate-800 text-base">食事データの直接手動修正</h3>
+              <button type="button" onClick={() => setEditingMeal(null)} className="p-1 rounded-full text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">時間区分</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {(['朝食', '昼食', '夕食', '間食'] as MealCategory[]).map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setEditingMeal({ ...editingMeal, category: cat })}
+                      className={`py-1.5 rounded-lg text-xs font-bold border ${
+                        editingMeal.category === cat
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-slate-50 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">メニュー名</label>
+                <input
+                  type="text"
+                  value={editingMeal.name}
+                  onChange={(e) => setEditingMeal({ ...editingMeal, name: e.target.value })}
+                  className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">カロリー (kcal)</label>
+                  <input
+                    type="number"
+                    value={editingMeal.calories}
+                    onChange={(e) => setEditingMeal({ ...editingMeal, calories: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-indigo-600 block mb-1">P タンパク質 (g)</label>
+                  <input
+                    type="number"
+                    value={editingMeal.p}
+                    onChange={(e) => setEditingMeal({ ...editingMeal, p: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-amber-600 block mb-1">F 脂質 (g)</label>
+                  <input
+                    type="number"
+                    value={editingMeal.f}
+                    onChange={(e) => setEditingMeal({ ...editingMeal, f: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-emerald-600 block mb-1">C 炭水化物 (g)</label>
+                  <input
+                    type="number"
+                    value={editingMeal.c}
+                    onChange={(e) => setEditingMeal({ ...editingMeal, c: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingMeal(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-sm"
+              >
+                変更を保存
+              </button>
+            </div>
           </div>
         </div>
       )}
