@@ -14,7 +14,6 @@ import {
   Sparkles,
   Image as ImageIcon,
   Trash2,
-  Edit2,
   Calculator,
   Target,
   Trophy,
@@ -23,6 +22,8 @@ import {
   Award,
   AlertTriangle,
   HeartPulse,
+  ChefHat,
+  CheckSquare,
 } from 'lucide-react';
 
 type MealCategory = '朝食' | '昼食' | '夕食' | '間食';
@@ -49,9 +50,9 @@ interface UserProfile {
   targetMonths: number;
   metabolismType: 'lipid' | 'carb' | 'muscle';
   metabolismTypeName: string;
-  bmr: number; // 基礎代謝量（最低ライン）
-  tdee: number; // 総消費カロリー
-  targetCalories: number; // 適正目標カロリー
+  bmr: number;
+  tdee: number;
+  targetCalories: number;
   targetP: number;
   targetF: number;
   targetC: number;
@@ -71,7 +72,6 @@ const calculateLogicalTargets = (
   targetMonths: number,
   metabolismType: 'lipid' | 'carb' | 'muscle'
 ) => {
-  // 1. 基礎代謝量 (BMR) - ハリス・ベネディクト改訂式
   let bmr = 0;
   if (gender === 'male') {
     bmr = 88.362 + 13.397 * weight + 4.799 * height - 5.677 * age;
@@ -80,22 +80,17 @@ const calculateLogicalTargets = (
   }
   bmr = Math.round(bmr);
 
-  // 2. 総消費カロリー (TDEE) - 身体活動レベル（普通 1.45）
   const tdee = Math.round(bmr * 1.45);
-
-  // 3. 落とすべき体脂肪量 & 1日あたりの必要アンダーカロリー
   const weightToLose = Math.max(weight - targetWeight, 0);
   const totalDeficitCalories = weightToLose * 7200;
   const days = targetMonths * 30;
   const dailyDeficit = days > 0 ? totalDeficitCalories / days : 0;
 
-  // 4. 適正目標カロリー（※基礎代謝を下回らない安全制御）
   let targetCalories = Math.round(tdee - dailyDeficit);
   if (targetCalories < bmr) {
-    targetCalories = bmr; // 基礎代謝を下回らない安全ガード
+    targetCalories = bmr;
   }
 
-  // 5. PFCバランス自動調整（代謝タイプ別）
   let pRatio = 0.25, fRatio = 0.25, cRatio = 0.5;
   if (metabolismType === 'lipid') {
     pRatio = 0.3; fRatio = 0.18; cRatio = 0.52;
@@ -110,6 +105,111 @@ const calculateLogicalTargets = (
   const targetC = Math.round((targetCalories * cRatio) / 4);
 
   return { targetCalories, targetP, targetF, targetC, bmr, tdee };
+};
+
+// 適正カロリー＆代謝タイプに応じたおすすめフルコース献立自動生成
+const generateRecommendedMenu = (user: UserProfile): MealItem[] => {
+  const { targetCalories, metabolismType } = user;
+
+  // 朝 30%, 昼 40%, 夜 30% 配分
+  const breakfastCal = Math.round(targetCalories * 0.3);
+  const lunchCal = Math.round(targetCalories * 0.4);
+  const dinnerCal = Math.round(targetCalories * 0.3);
+
+  if (metabolismType === 'lipid') {
+    // 脂質代謝低下タイプ向け（低脂質・高タンパク）
+    return [
+      {
+        id: `rec-b-${Date.now()}`,
+        category: '朝食',
+        name: '【高タンパク和朝食】鮭の塩焼き・玄米ご飯（中盛）・なめこ味噌汁・ノンオイルツナ和え',
+        calories: breakfastCal,
+        p: Math.round((breakfastCal * 0.3) / 4),
+        f: Math.round((breakfastCal * 0.18) / 9),
+        c: Math.round((breakfastCal * 0.52) / 4),
+      },
+      {
+        id: `rec-l-${Date.now()}`,
+        category: '昼食',
+        name: '【低脂質クリーンランチ】蒸し鶏胸肉の彩りランチボウル・和風ノンオイルドレッシング・もち麦ご飯',
+        calories: lunchCal,
+        p: Math.round((lunchCal * 0.32) / 4),
+        f: Math.round((lunchCal * 0.16) / 9),
+        c: Math.round((lunchCal * 0.52) / 4),
+      },
+      {
+        id: `rec-d-${Date.now()}`,
+        category: '夕食',
+        name: '【夜の代謝キープ食】タラと大根の和風寄せ鍋（豆腐・野菜たっぷり）・小海老の酢の物',
+        calories: dinnerCal,
+        p: Math.round((dinnerCal * 0.3) / 4),
+        f: Math.round((dinnerCal * 0.18) / 9),
+        c: Math.round((dinnerCal * 0.52) / 4),
+      },
+    ];
+  } else if (metabolismType === 'carb') {
+    // 糖質吸収過多タイプ向け（低GI・適性糖質）
+    return [
+      {
+        id: `rec-b-${Date.now()}`,
+        category: '朝食',
+        name: '【低GIエナジー】プロテインオートミールボウル・ミックスベリー・素焼きアーモンド5粒',
+        calories: breakfastCal,
+        p: Math.round((breakfastCal * 0.3) / 4),
+        f: Math.round((breakfastCal * 0.28) / 9),
+        c: Math.round((breakfastCal * 0.42) / 4),
+      },
+      {
+        id: `rec-l-${Date.now()}`,
+        category: '昼食',
+        name: '【血糖値安定ランチ】牛赤身ステーキ（150g）・さつまいも添え・具だくさんサラダ',
+        calories: lunchCal,
+        p: Math.round((lunchCal * 0.3) / 4),
+        f: Math.round((lunchCal * 0.3) / 9),
+        c: Math.round((lunchCal * 0.4) / 4),
+      },
+      {
+        id: `rec-d-${Date.now()}`,
+        category: '夕食',
+        name: '【満足糖質オフ食】サバの生姜煮・枝豆豆腐・海草ともずくのスープ・十六穀米（少なめ）',
+        calories: dinnerCal,
+        p: Math.round((dinnerCal * 0.3) / 4),
+        f: Math.round((dinnerCal * 0.3) / 9),
+        c: Math.round((dinnerCal * 0.4) / 4),
+      },
+    ];
+  } else {
+    // 筋肉維持・高タンパク標準タイプ
+    return [
+      {
+        id: `rec-b-${Date.now()}`,
+        category: '朝食',
+        name: '【筋合成モーニング】目玉焼き2個・全粒粉トースト・ギリシャヨーグルト',
+        calories: breakfastCal,
+        p: Math.round((breakfastCal * 0.32) / 4),
+        f: Math.round((breakfastCal * 0.23) / 9),
+        c: Math.round((breakfastCal * 0.45) / 4),
+      },
+      {
+        id: `rec-l-${Date.now()}`,
+        category: '昼食',
+        name: '【マッスルパワーランチ】鶏もも肉（皮なし）の照り焼き定食・ご飯普通盛り・豚汁',
+        calories: lunchCal,
+        p: Math.round((lunchCal * 0.35) / 4),
+        f: Math.round((lunchCal * 0.25) / 9),
+        c: Math.round((lunchCal * 0.4) / 4),
+      },
+      {
+        id: `rec-d-${Date.now()}`,
+        category: '夕食',
+        name: '【高タンパクディナー】刺身盛り合わせ（まぐろ・サーモン）・納豆・冷奴・野菜スープ',
+        calories: dinnerCal,
+        p: Math.round((dinnerCal * 0.35) / 4),
+        f: Math.round((dinnerCal * 0.25) / 9),
+        c: Math.round((dinnerCal * 0.4) / 4),
+      },
+    ];
+  }
 };
 
 const getGameRank = (accumulatedCalories: number, totalGoalCalories: number) => {
@@ -149,10 +249,8 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     accumulatedDeficitCalories: 12800,
     todayMeals: [
       { id: 'm1', category: '朝食', name: '鮭塩焼き・玄米ご飯・味噌汁', calories: 420, p: 28, f: 10, c: 55 },
-      { id: 'm2', category: '昼食', name: '蒸し鶏と彩り野菜のサラダボウル', calories: 480, p: 35, f: 12, c: 58 },
-      { id: 'm3', category: '間食', name: 'ギリシャヨーグルト・素焼きアーモンド', calories: 150, p: 12, f: 5, c: 12 },
     ],
-    adviceMessage: '佐藤様は脂質代謝低下タイプです。最低ラインである基礎代謝（1,260kcal）をしっかり超えつつ、適正カロリー内でコントロールできています！食べることを恐れずPFCを整えましょう。',
+    adviceMessage: '佐藤様は脂質代謝低下タイプです。最低ラインである基礎代謝（1,260kcal）をしっかり超えつつ、適正カロリー内でコントロールできています！',
   },
   userB: {
     id: 'userB',
@@ -173,10 +271,7 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetF: 61,
     targetC: 185,
     accumulatedDeficitCalories: 21500,
-    todayMeals: [
-      { id: 'm5', category: '朝食', name: 'プロテイン・オートミールボウル', calories: 450, p: 35, f: 8, c: 60 },
-      { id: 'm6', category: '昼食', name: '牛肉赤身ステーキ定食（ご飯少なめ）', calories: 750, p: 48, f: 28, c: 75 },
-    ],
+    todayMeals: [],
     adviceMessage: '田中様は糖質タイプです。基礎代謝1,580kcalを切ると筋肉量が落ちて代謝が低下します。夕食でしっかりタンパク質を補給してください！',
   },
 };
@@ -196,6 +291,10 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<MealCategory>('昼食');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<MealItem | null>(null);
+
+  // 迷った時のメニュー提案モーダル
+  const [isMenuSuggestionModalOpen, setIsMenuSuggestionModalOpen] = useState(false);
+  const [suggestedMenu, setSuggestedMenu] = useState<MealItem[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentUser = users[selectedUserId];
@@ -250,9 +349,24 @@ export default function App() {
     showToast('基礎代謝・適正カロリーの再計算が完了しました！');
   };
 
-  const openCalcModal = () => {
-    setCalcForm(currentUser);
-    setIsCalcModalOpen(true);
+  // 迷った時の献立生成発動
+  const handleOpenMenuSuggestion = () => {
+    const menu = generateRecommendedMenu(currentUser);
+    setSuggestedMenu(menu);
+    setIsMenuSuggestionModalOpen(true);
+  };
+
+  // 提案献立を一括適用
+  const handleApplySuggestedMenu = () => {
+    setUsers((prev) => ({
+      ...prev,
+      [selectedUserId]: {
+        ...prev[selectedUserId],
+        todayMeals: [...suggestedMenu],
+      },
+    }));
+    setIsMenuSuggestionModalOpen(false);
+    showToast('本日のおすすめ献立（朝・昼・夜）を一括登録しました！');
   };
 
   const runAiAnalysis = () => {
@@ -334,16 +448,18 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
-            <User className="w-4 h-4 text-emerald-600 ml-1" />
-            <select
-              value={selectedUserId}
-              onChange={handleUserChange}
-              className="bg-transparent text-slate-800 text-xs font-bold py-1 pr-2 outline-none cursor-pointer"
-            >
-              <option value="userA">佐藤 佳代 様 (脂質タイプ)</option>
-              <option value="userB">田中 健太郎 様 (糖質タイプ)</option>
-            </select>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
+              <User className="w-4 h-4 text-emerald-600 ml-1" />
+              <select
+                value={selectedUserId}
+                onChange={handleUserChange}
+                className="bg-transparent text-slate-800 text-xs font-bold py-1 pr-2 outline-none cursor-pointer"
+              >
+                <option value="userA">佐藤 佳代 様 (脂質タイプ)</option>
+                <option value="userB">田中 健太郎 様 (糖質タイプ)</option>
+              </select>
+            </div>
           </div>
         </div>
       </header>
@@ -369,15 +485,25 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={openCalcModal}
+                onClick={handleOpenMenuSuggestion}
+                className="px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-900 font-black text-xs shadow-md transition-all flex items-center gap-2 border border-amber-300"
+              >
+                <ChefHat className="w-4 h-4 text-slate-900" />
+                <span>🎯 迷ったらコレ！本日の推奨献立</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsCalcModalOpen(true)}
                 className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 border border-slate-700"
               >
                 <Calculator className="w-4 h-4 text-emerald-400" />
-                <span>目標設定・自動計算</span>
+                <span>目標計算</span>
               </button>
+
               <button
                 type="button"
                 onClick={() => setIsAiModalOpen(true)}
@@ -456,9 +582,7 @@ export default function App() {
             <span className="text-xs text-slate-500 font-medium">※不健康な食べないダイエットを防止する安全基準</span>
           </div>
 
-          {/* カロリー比較カード 2連 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* 1. 基礎代謝量（最低ライン） */}
             <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-1.5 mb-1">
@@ -473,7 +597,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 2. 適正目標カロリー */}
             <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-1.5 mb-1">
@@ -489,7 +612,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* 本日の進捗メーター（基礎代謝判定バッジ付き） */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-slate-900 text-white p-5 rounded-2xl flex flex-col justify-between shadow-inner">
               <div className="flex items-center justify-between">
@@ -511,7 +633,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 最低ライン警告判定 */}
               {isBelowBmr ? (
                 <div className="bg-rose-500/20 text-rose-300 text-[10px] font-bold p-2 rounded-xl border border-rose-500/30 flex items-center gap-1">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -525,7 +646,6 @@ export default function App() {
               )}
             </div>
 
-            {/* PFC 3項目 */}
             <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-2xl flex flex-col justify-between">
                 <div>
@@ -589,40 +709,44 @@ export default function App() {
           </div>
 
           <div className="space-y-2">
-            {currentUser.todayMeals.map((meal) => (
-              <div
-                key={meal.id}
-                className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-all gap-2"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-bold text-emerald-800 bg-emerald-100/80 px-2.5 py-1 rounded-lg shrink-0">
-                    {meal.category}
-                  </span>
-                  <span className="text-xs font-bold text-slate-800">{meal.name}</span>
-                </div>
-
-                <div className="flex items-center gap-4 text-xs font-medium text-slate-600 justify-between sm:justify-end">
+            {currentUser.todayMeals.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6">本日の食事ログはまだありません。「🎯 迷ったらコレ！」または「AI食事解析」から追加してください。</p>
+            ) : (
+              currentUser.todayMeals.map((meal) => (
+                <div
+                  key={meal.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-all gap-2"
+                >
                   <div className="flex items-center gap-3">
-                    <span className="font-black text-slate-800">{meal.calories} kcal</span>
-                    <div className="flex gap-2 text-[11px]">
-                      <span className="text-indigo-600 font-bold">P:{meal.p}g</span>
-                      <span className="text-amber-600 font-bold">F:{meal.f}g</span>
-                      <span className="text-emerald-600 font-bold">C:{meal.c}g</span>
+                    <span className="text-xs font-bold text-emerald-800 bg-emerald-100/80 px-2.5 py-1 rounded-lg shrink-0">
+                      {meal.category}
+                    </span>
+                    <span className="text-xs font-bold text-slate-800">{meal.name}</span>
+                  </div>
+
+                  <div className="flex items-center gap-4 text-xs font-medium text-slate-600 justify-between sm:justify-end">
+                    <div className="flex items-center gap-3">
+                      <span className="font-black text-slate-800">{meal.calories} kcal</span>
+                      <div className="flex gap-2 text-[11px]">
+                        <span className="text-indigo-600 font-bold">P:{meal.p}g</span>
+                        <span className="text-amber-600 font-bold">F:{meal.f}g</span>
+                        <span className="text-emerald-600 font-bold">C:{meal.c}g</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 border-l border-slate-200 pl-3">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteMeal(meal.id)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-1 border-l border-slate-200 pl-3">
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteMeal(meal.id)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 
@@ -650,6 +774,72 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* 🎯 迷った時の完全カスタマイズ推奨献立モーダル */}
+      {isMenuSuggestionModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <ChefHat className="w-6 h-6 text-amber-500" />
+                <div>
+                  <h3 className="font-black text-slate-800 text-base">{currentUser.name} 様 専用推奨献立</h3>
+                  <p className="text-[10px] text-slate-500">適正カロリー ({currentUser.targetCalories} kcal) & 代謝タイプ自動最適化</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setIsMenuSuggestionModalOpen(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-900 space-y-1">
+              <span className="font-black flex items-center gap-1">
+                💡 {currentUser.metabolismTypeName}に最適なPFC比率
+              </span>
+              <p className="text-[11px] leading-relaxed text-amber-800">
+                食べなさすぎによる基礎代謝低下を防ぎ、脂肪燃焼効率を最大化する「朝30%・昼40%・夜30%」の黄金配分メニューです。
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              {suggestedMenu.map((item) => (
+                <div key={item.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-md">
+                      {item.category}
+                    </span>
+                    <span className="text-xs font-black text-slate-800">{item.calories} kcal</span>
+                  </div>
+                  <p className="text-xs font-bold text-slate-800 leading-snug">{item.name}</p>
+                  <div className="flex gap-3 text-[11px] pt-1 text-slate-500 font-medium">
+                    <span>P: <strong className="text-indigo-600">{item.p}g</strong></span>
+                    <span>F: <strong className="text-amber-600">{item.f}g</strong></span>
+                    <span>C: <strong className="text-emerald-600">{item.c}g</strong></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsMenuSuggestionModalOpen(false)}
+                className="flex-1 py-3 rounded-2xl border border-slate-300 text-xs font-bold text-slate-600"
+              >
+                閉じる
+              </button>
+              <button
+                type="button"
+                onClick={handleApplySuggestedMenu}
+                className="flex-1 py-3 rounded-2xl bg-emerald-600 text-white text-xs font-bold shadow-md flex items-center justify-center gap-1.5"
+              >
+                <CheckSquare className="w-4 h-4 text-emerald-200" />
+                <span>この献立を本日のログに一括登録</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 目標・基礎代謝自動計算モーダル */}
       {isCalcModalOpen && (
@@ -863,7 +1053,7 @@ export default function App() {
                   onClick={saveAnalyzedMeal}
                   className="w-full py-3 rounded-xl bg-slate-900 text-white font-bold text-xs"
                 >
-                  この食事ログを追加する
+                  この食事ログに追加する
                 </button>
               </div>
             )}
