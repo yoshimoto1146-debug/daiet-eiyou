@@ -17,6 +17,10 @@ import {
   Edit2,
   Calculator,
   Target,
+  Trophy,
+  Zap,
+  Shield,
+  Award,
 } from 'lucide-react';
 
 type MealCategory = '朝食' | '昼食' | '夕食' | '間食';
@@ -36,17 +40,18 @@ interface UserProfile {
   name: string;
   age: number;
   gender: 'female' | 'male';
-  height: number; // cm
-  weight: number; // kg
-  bodyFatRatio: number; // %
-  targetWeight: number; // kg
-  targetMonths: number; // 達成目標期間（ヶ月）
+  height: number;
+  weight: number;
+  bodyFatRatio: number;
+  targetWeight: number;
+  targetMonths: number;
   metabolismType: 'lipid' | 'carb' | 'muscle';
   metabolismTypeName: string;
   targetCalories: number;
   targetP: number;
   targetF: number;
   targetC: number;
+  accumulatedDeficitCalories: number; // 累計カット（消費）成功カロリー
   todayMeals: MealItem[];
   adviceMessage: string;
 }
@@ -62,7 +67,6 @@ const calculateLogicalTargets = (
   targetMonths: number,
   metabolismType: 'lipid' | 'carb' | 'muscle'
 ) => {
-  // 1. 基礎代謝量 (BMR) - ハリス・ベネディクト改訂式
   let bmr = 0;
   if (gender === 'male') {
     bmr = 88.362 + 13.397 * weight + 4.799 * height - 5.677 * age;
@@ -70,55 +74,49 @@ const calculateLogicalTargets = (
     bmr = 447.593 + 9.247 * weight + 3.098 * height - 4.33 * age;
   }
 
-  // 2. 総消費カロリー (TDEE) - 身体活動レベル（普通 1.45 で計算）
   const tdee = bmr * 1.45;
-
-  // 3. 落とすべき体脂肪量 (kg)
   const weightToLose = Math.max(weight - targetWeight, 0);
-
-  // 4. 総削減必要カロリー（体脂肪1kg = 約7200kcal）
   const totalDeficitCalories = weightToLose * 7200;
-
-  // 5. 1日あたりの目標アンダーカロリー
   const days = targetMonths * 30;
   const dailyDeficit = days > 0 ? totalDeficitCalories / days : 0;
 
-  // 6. 目標摂取カロリー（BMR未満には落とさない安全設計）
   let targetCalories = Math.round(tdee - dailyDeficit);
   if (targetCalories < bmr) {
-    targetCalories = Math.round(bmr); // 基礎代謝を下回らない
+    targetCalories = Math.round(bmr);
   }
 
-  // 7. PFCバランス自動調整（代謝タイプ別）
-  let pRatio = 0.25;
-  let fRatio = 0.25;
-  let cRatio = 0.5;
-
+  let pRatio = 0.25, fRatio = 0.25, cRatio = 0.5;
   if (metabolismType === 'lipid') {
-    // 脂質代謝低下タイプ：脂質を抑えてPとCを確保
-    pRatio = 0.3;
-    fRatio = 0.18;
-    cRatio = 0.52;
+    pRatio = 0.3; fRatio = 0.18; cRatio = 0.52;
   } else if (metabolismType === 'carb') {
-    // 糖質吸収過多タイプ：炭水化物を抑えてPとFを確保
-    pRatio = 0.3;
-    fRatio = 0.3;
-    cRatio = 0.4;
+    pRatio = 0.3; fRatio = 0.3; cRatio = 0.4;
   } else {
-    // 筋肉維持・高代謝タイプ
-    pRatio = 0.35;
-    fRatio = 0.25;
-    cRatio = 0.4;
+    pRatio = 0.35; fRatio = 0.25; cRatio = 0.4;
   }
 
-  const targetP = Math.round((targetCalories * pRatio) / 4); // 1g = 4kcal
-  const targetF = Math.round((targetCalories * fRatio) / 9); // 1g = 9kcal
-  const targetC = Math.round((targetCalories * cRatio) / 4); // 1g = 4kcal
+  const targetP = Math.round((targetCalories * pRatio) / 4);
+  const targetF = Math.round((targetCalories * fRatio) / 9);
+  const targetC = Math.round((targetCalories * cRatio) / 4);
 
-  return { targetCalories, targetP, targetF, targetC, bmr: Math.round(bmr), tdee: Math.round(tdee) };
+  return { targetCalories, targetP, targetF, targetC, bmr: Math.round(bmr), tdee: Math.round(tdee), totalDeficitCalories };
 };
 
-// 初期ユーザーデータ
+// ゲーム用ランク計算関数
+const getGameRank = (accumulatedCalories: number, totalGoalCalories: number) => {
+  const burnedFatKg = (accumulatedCalories / 7200).toFixed(2);
+  const butterCount = Math.floor(accumulatedCalories / 1500); // バター1箱約1500kcal相当
+  const expLevel = Math.floor(accumulatedCalories / 1000) + 1;
+  const progressPercent = Math.min(Math.round((accumulatedCalories / Math.max(totalGoalCalories, 1)) * 100), 100);
+
+  let title = '減量チャレンジャー';
+  if (expLevel >= 20) title = 'ロジカル・マスター';
+  else if (expLevel >= 15) title = '代謝コマンダー';
+  else if (expLevel >= 10) title = '体脂肪ハンター';
+  else if (expLevel >= 5) title = 'アンダーカロリーナイト';
+
+  return { burnedFatKg, butterCount, expLevel, title, progressPercent };
+};
+
 const INITIAL_USERS: Record<string, UserProfile> = {
   userA: {
     id: 'userA',
@@ -136,12 +134,13 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetP: 108,
     targetF: 29,
     targetC: 188,
+    accumulatedDeficitCalories: 12800, // 約1.7kg相当の消費成功
     todayMeals: [
       { id: 'm1', category: '朝食', name: '鮭塩焼き・玄米ご飯・味噌汁', calories: 420, p: 28, f: 10, c: 55 },
       { id: 'm2', category: '昼食', name: '蒸し鶏と彩り野菜のサラダボウル', calories: 480, p: 35, f: 12, c: 58 },
       { id: 'm3', category: '間食', name: 'ギリシャヨーグルト・素焼きアーモンド', calories: 150, p: 12, f: 5, c: 12 },
     ],
-    adviceMessage: '佐藤様は脂質代謝低下タイプです。夕食の脂質を抑えられており非常に素晴らしい進捗です！夜間はPFCのうちタンパク質を意識して補給してください。',
+    adviceMessage: '佐藤様は脂質代謝低下タイプです。現在バター約8箱分の体脂肪撃退に成功しています！この調子でクエストを進めましょう！',
   },
   userB: {
     id: 'userB',
@@ -159,11 +158,12 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetP: 138,
     targetF: 61,
     targetC: 185,
+    accumulatedDeficitCalories: 21500, // 約3kg相当の消費成功
     todayMeals: [
       { id: 'm5', category: '朝食', name: 'プロテイン・オートミールボウル', calories: 450, p: 35, f: 8, c: 60 },
       { id: 'm6', category: '昼食', name: '牛肉赤身ステーキ定食（ご飯少なめ）', calories: 750, p: 48, f: 28, c: 75 },
     ],
-    adviceMessage: '田中様は糖質タイプです。本日の炭水化物は目標範囲内に抑えられています。食後の軽いウォーキングで血糖値の上昇を抑制しましょう！',
+    adviceMessage: '田中様は糖質タイプです。レベル22突破！現在の体脂肪撃退ペースは非常に論理的かつ好調です！',
   },
 };
 
@@ -172,11 +172,9 @@ export default function App() {
   const [selectedUserId, setSelectedUserId] = useState<string>('userA');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // 目標設定モーダル用の状態
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
   const [calcForm, setCalcForm] = useState<UserProfile>(INITIAL_USERS['userA']);
 
-  // AI解析モーダル
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'image' | 'text'>('image');
   const [pastedText, setPastedText] = useState('');
@@ -185,17 +183,18 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<MealItem | null>(null);
 
-  // 編集モーダル
   const [editingMeal, setEditingMeal] = useState<MealItem | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentUser = users[selectedUserId];
 
-  // カロリー・PFC動的計算
   const currentCalories = currentUser.todayMeals.reduce((acc, m) => acc + m.calories, 0);
   const currentP = currentUser.todayMeals.reduce((acc, m) => acc + m.p, 0);
   const currentF = currentUser.todayMeals.reduce((acc, m) => acc + m.f, 0);
   const currentC = currentUser.todayMeals.reduce((acc, m) => acc + m.c, 0);
+
+  const totalGoalDeficit = (currentUser.weight - currentUser.targetWeight) * 7200;
+  const gameInfo = getGameRank(currentUser.accumulatedDeficitCalories, totalGoalDeficit);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -208,7 +207,6 @@ export default function App() {
     showToast(`「${users[newUserId].name} 様」に切り替えました`);
   };
 
-  // 目標再計算実行＆保存
   const handleSaveLogicalTargets = () => {
     const calculated = calculateLogicalTargets(
       calcForm.gender,
@@ -233,7 +231,7 @@ export default function App() {
     }));
 
     setIsCalcModalOpen(false);
-    showToast('ロジカル目標数値の自動更新が完了しました！');
+    showToast('ロジカル目標の更新が完了しました！');
   };
 
   const openCalcModal = () => {
@@ -241,48 +239,28 @@ export default function App() {
     setIsCalcModalOpen(true);
   };
 
-  // AI解析実行
   const runAiAnalysis = () => {
-    if (activeTab === 'image' && !selectedImage) {
-      alert('画像を選択してください');
-      return;
-    }
-    if (activeTab === 'text' && !pastedText.trim()) {
-      alert('文章を入力してください');
-      return;
-    }
+    if (activeTab === 'image' && !selectedImage) return alert('画像を選択してください');
+    if (activeTab === 'text' && !pastedText.trim()) return alert('文章を入力してください');
 
     setIsAnalyzing(true);
     setAnalysisResult(null);
 
     setTimeout(() => {
       setIsAnalyzing(false);
-      if (activeTab === 'text') {
-        setAnalysisResult({
-          id: `ai-${Date.now()}`,
-          category: selectedCategory,
-          name: `解析: ${pastedText.slice(0, 15)}...`,
-          calories: 520,
-          p: 32,
-          f: 14,
-          c: 65,
-        });
-      } else {
-        setAnalysisResult({
-          id: `ai-${Date.now()}`,
-          category: selectedCategory,
-          name: '解析: 豚生姜焼き定食・小鉢セット',
-          calories: 680,
-          p: 38,
-          f: 22,
-          c: 78,
-        });
-      }
+      setAnalysisResult({
+        id: `ai-${Date.now()}`,
+        category: selectedCategory,
+        name: activeTab === 'text' ? `解析: ${pastedText.slice(0, 15)}...` : '解析: 豚生姜焼き定食・小鉢セット',
+        calories: 580,
+        p: 34,
+        f: 18,
+        c: 68,
+      });
       showToast('AI解析が完了しました');
     }, 1200);
   };
 
-  // 食事追加
   const saveAnalyzedMeal = () => {
     if (!analysisResult) return;
     setUsers((prev) => ({
@@ -299,7 +277,6 @@ export default function App() {
     setAnalysisResult(null);
   };
 
-  // 食事削除
   const handleDeleteMeal = (mealId: string) => {
     if (window.confirm('この食事データを削除してよろしいですか？')) {
       setUsers((prev) => ({
@@ -313,20 +290,6 @@ export default function App() {
     }
   };
 
-  // 食事編集保存
-  const handleSaveEdit = () => {
-    if (!editingMeal) return;
-    setUsers((prev) => ({
-      ...prev,
-      [selectedUserId]: {
-        ...prev[selectedUserId],
-        todayMeals: prev[selectedUserId].todayMeals.map((m) => (m.id === editingMeal.id ? editingMeal : m)),
-      },
-    }));
-    setEditingMeal(null);
-    showToast('修正内容を更新しました');
-  };
-
   const calPercent = Math.min(Math.round((currentCalories / currentUser.targetCalories) * 100), 100);
   const pPercent = Math.min(Math.round((currentP / currentUser.targetP) * 100), 100);
   const fPercent = Math.min(Math.round((currentF / currentUser.targetF) * 100), 100);
@@ -334,7 +297,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col antialiased font-sans">
-      {/* トースト通知 */}
+      {/* トースト */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-xs font-bold border border-slate-700 animate-bounce">
           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -351,7 +314,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 PFC管理</h1>
-              <p className="text-[10px] text-slate-500 font-medium">ロジカルダイエット理論 準拠システム</p>
+              <p className="text-[10px] text-slate-500 font-medium">ロジカルダイエットゲーミフィケーション</p>
             </div>
           </div>
 
@@ -371,57 +334,122 @@ export default function App() {
 
       {/* メイン */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6 space-y-6">
-        {/* プロフィール ＆ 目標設定ボタン */}
-        <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-3xl p-6 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-3 py-1 rounded-full">
-                {currentUser.metabolismTypeName}
-              </span>
-              <span className="text-xs text-slate-400">
-                {currentUser.height}cm / {currentUser.weight}kg (目標: {currentUser.targetWeight}kg / {currentUser.targetMonths}ヶ月)
-              </span>
-            </div>
-            <h2 className="text-2xl font-black text-white mt-2">{currentUser.name} 様の分析ダッシュボード</h2>
+        {/* 🎮 ゲーム風ステータス・進捗ダッシュボード */}
+        <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 shadow-xl border border-slate-800 space-y-6 relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+            <Trophy className="w-64 h-64 text-amber-400" />
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={openCalcModal}
-              className="px-4 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 border border-slate-600"
-            >
-              <Calculator className="w-4 h-4 text-emerald-400" />
-              <span>目標カロリー自動計算</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsAiModalOpen(true)}
-              className="px-4 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2"
-            >
-              <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-              <span>LINEスクショ/文章 AI解析</span>
-            </button>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-400 to-orange-500 flex items-center justify-center text-slate-900 font-black text-2xl shadow-lg border-2 border-amber-300">
+                Lv.{gameInfo.expLevel}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40 px-3 py-0.5 rounded-full flex items-center gap-1">
+                    <Shield className="w-3 h-3" />
+                    {gameInfo.title}
+                  </span>
+                  <span className="text-xs text-slate-400">{currentUser.metabolismTypeName}</span>
+                </div>
+                <h2 className="text-2xl font-black text-white mt-1">{currentUser.name} 様のクエスト進捗</h2>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openCalcModal}
+                className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 border border-slate-700"
+              >
+                <Calculator className="w-4 h-4 text-emerald-400" />
+                <span>目標設定</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsAiModalOpen(true)}
+                className="px-4 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                <span>AI食事解析</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 消費実績可視化カード 3連 */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10">
+            <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 flex items-center gap-4">
+              <div className="p-3 bg-rose-500/20 text-rose-400 rounded-xl">
+                <Flame className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold text-slate-300 block">累計撃退エネルギー</span>
+                <span className="text-xl font-black text-amber-300">
+                  {currentUser.accumulatedDeficitCalories.toLocaleString()} <span className="text-xs text-white">kcal</span>
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 flex items-center gap-4">
+              <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-xl">
+                <Zap className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold text-slate-300 block">純粋体脂肪カット量</span>
+                <span className="text-xl font-black text-emerald-400">
+                  -{gameInfo.burnedFatKg} <span className="text-xs text-white">kg</span>
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 flex items-center gap-4">
+              <div className="p-3 bg-amber-500/20 text-amber-400 rounded-xl">
+                <Award className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold text-slate-300 block">身近な例え（バター換算）</span>
+                <span className="text-xl font-black text-amber-400">
+                  バター約 {gameInfo.butterCount} 箱分 <span className="text-xs text-white">消滅</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* クエスト達成プログレスバー */}
+          <div className="space-y-2 relative z-10 bg-black/20 p-4 rounded-2xl border border-white/5">
+            <div className="flex justify-between items-center text-xs font-bold">
+              <span className="text-slate-300 flex items-center gap-1.5">
+                <Trophy className="w-4 h-4 text-amber-400" />
+                【最終目標】体脂肪 {currentUser.weight - currentUser.targetWeight}kg 撃退クエスト
+              </span>
+              <span className="text-amber-400 font-black">{gameInfo.progressPercent}% 達成</span>
+            </div>
+            <div className="w-full bg-slate-800 h-3.5 rounded-full overflow-hidden p-0.5 border border-slate-700">
+              <div
+                className="bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400 h-full rounded-full transition-all duration-700 shadow-lg"
+                style={{ width: `${gameInfo.progressPercent}%` }}
+              ></div>
+            </div>
           </div>
         </div>
 
-        {/* PFC・カロリー */}
+        {/* PFC・本日カロリー */}
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
           <div className="flex justify-between items-center pb-3 border-b border-slate-100">
             <div className="flex items-center gap-2">
               <Target className="w-5 h-5 text-emerald-600" />
-              <h3 className="font-bold text-slate-800 text-base">ロジカル目標摂取カロリー＆PFC達成度</h3>
+              <h3 className="font-bold text-slate-800 text-base">本日のエネルギー＆PFCクエスト</h3>
             </div>
             <span className="text-xs font-bold text-slate-500">
-              目標: <strong className="text-emerald-600">{currentUser.targetCalories}</strong> kcal/日
+              上限目標: <strong className="text-emerald-600">{currentUser.targetCalories}</strong> kcal/日
             </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {/* カロリー */}
             <div className="bg-slate-900 text-white p-5 rounded-2xl flex flex-col justify-between shadow-inner">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400">総摂取カロリー</span>
+                <span className="text-xs font-bold text-slate-400">本日摂取エネルギー</span>
                 <Flame className="w-5 h-5 text-amber-400" />
               </div>
               <div className="my-3">
@@ -437,12 +465,11 @@ export default function App() {
                 </div>
               </div>
               <div className="flex justify-between text-xs text-slate-400 font-bold">
-                <span>達成度</span>
+                <span>消化率</span>
                 <span className="text-amber-400">{calPercent}%</span>
               </div>
             </div>
 
-            {/* PFC 3項目 */}
             <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-2xl flex flex-col justify-between">
                 <div>
@@ -531,13 +558,6 @@ export default function App() {
                   <div className="flex items-center gap-1 border-l border-slate-200 pl-3">
                     <button
                       type="button"
-                      onClick={() => setEditingMeal(meal)}
-                      className="p-1.5 text-slate-400 hover:text-emerald-600 rounded-lg"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => handleDeleteMeal(meal.id)}
                       className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg"
                     >
@@ -557,7 +577,7 @@ export default function App() {
               <MessageSquare className="w-5 h-5" />
               <h3 className="font-bold text-base">ロジカルLINE指導アシスタント</h3>
             </div>
-            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">自動計算ロジック連動</span>
+            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">ゲーム判定連動</span>
           </div>
           <p className="text-xs text-emerald-100 leading-relaxed bg-black/10 p-3.5 rounded-2xl border border-white/10">
             {currentUser.adviceMessage}
@@ -575,14 +595,14 @@ export default function App() {
         </div>
       </main>
 
-      {/* 目標自動計算モーダル */}
+      {/* モーダル群 (略同機能) */}
       {isCalcModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <Calculator className="w-5 h-5 text-emerald-600" />
-                <h3 className="font-black text-slate-800 text-base">ロジカル目標カロリー自動計算</h3>
+                <h3 className="font-black text-slate-800 text-base">ロジカル目標自動計算</h3>
               </div>
               <button type="button" onClick={() => setIsCalcModalOpen(false)} className="p-1 rounded-full text-slate-400">
                 <X className="w-5 h-5" />
@@ -667,27 +687,6 @@ export default function App() {
                   </select>
                 </div>
               </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-600 block mb-1">代謝タイプ選択</label>
-                <select
-                  value={calcForm.metabolismType}
-                  onChange={(e) => {
-                    const val = e.target.value as 'lipid' | 'carb' | 'muscle';
-                    const nameMap = {
-                      lipid: '脂質代謝低下タイプ',
-                      carb: '糖質吸収過多タイプ',
-                      muscle: '筋肉維持・高代謝タイプ',
-                    };
-                    setCalcForm({ ...calcForm, metabolismType: val, metabolismTypeName: nameMap[val] });
-                  }}
-                  className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                >
-                  <option value="lipid">脂質代謝低下タイプ (F抑えめ/P&C多め)</option>
-                  <option value="carb">糖質吸収過多タイプ (C抑えめ/P&F多め)</option>
-                  <option value="muscle">筋肉維持・高代謝タイプ (高タンパク質)</option>
-                </select>
-              </div>
             </div>
 
             <div className="flex gap-2 pt-2">
@@ -703,14 +702,14 @@ export default function App() {
                 onClick={handleSaveLogicalTargets}
                 className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-sm"
               >
-                再計算して目標保存
+                目標設定を保存
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* AI解析モーダル */}
+      {/* AIモーダル */}
       {isAiModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5">
@@ -722,24 +721,6 @@ export default function App() {
               <button type="button" onClick={() => setIsAiModalOpen(false)} className="p-1 rounded-full text-slate-400">
                 <X className="w-5 h-5" />
               </button>
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1.5">時間区分を選択:</label>
-              <div className="grid grid-cols-4 gap-2">
-                {(['朝食', '昼食', '夕食', '間食'] as MealCategory[]).map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`py-2 rounded-xl text-xs font-bold border ${
-                      selectedCategory === cat ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-50 text-slate-600'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div className="flex bg-slate-100 p-1 rounded-2xl text-xs font-bold">
@@ -821,11 +802,6 @@ export default function App() {
                   <span className="text-xs font-bold text-slate-800">{analysisResult.calories} kcal</span>
                 </div>
                 <p className="text-xs font-bold text-slate-800">{analysisResult.name}</p>
-                <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold">
-                  <div className="bg-white p-2 rounded-xl">P: {analysisResult.p}g</div>
-                  <div className="bg-white p-2 rounded-xl">F: {analysisResult.f}g</div>
-                  <div className="bg-white p-2 rounded-xl">C: {analysisResult.c}g</div>
-                </div>
                 <button
                   type="button"
                   onClick={saveAnalyzedMeal}
@@ -841,7 +817,7 @@ export default function App() {
 
       {/* フッター */}
       <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
-        サクラ整骨院 PFC Balance Manager
+        サクラ整骨院 PFC Balance Manager (Gamified Edition)
       </footer>
     </div>
   );
