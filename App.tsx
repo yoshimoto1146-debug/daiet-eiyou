@@ -16,14 +16,12 @@ import {
   Trash2,
   Calculator,
   Target,
-  Trophy,
-  Zap,
-  Shield,
-  Award,
   AlertTriangle,
   HeartPulse,
   ChefHat,
   CheckSquare,
+  Activity,
+  BookOpen,
 } from 'lucide-react';
 
 type MealCategory = '朝食' | '昼食' | '夕食' | '間食';
@@ -36,6 +34,7 @@ interface MealItem {
   p: number;
   f: number;
   c: number;
+  recipe?: string; // 作り方・調理ポイント
 }
 
 interface UserProfile {
@@ -56,7 +55,6 @@ interface UserProfile {
   targetP: number;
   targetF: number;
   targetC: number;
-  accumulatedDeficitCalories: number;
   todayMeals: MealItem[];
   adviceMessage: string;
 }
@@ -107,7 +105,7 @@ const calculateLogicalTargets = (
   return { targetCalories, targetP, targetF, targetC, bmr, tdee };
 };
 
-// 適正カロリー＆代謝タイプに応じたおすすめフルコース献立自動生成
+// 適正カロリー＆代謝タイプに応じたおすすめフルコース献立自動生成（作り方付き）
 const generateRecommendedMenu = (user: UserProfile): MealItem[] => {
   const { targetCalories, metabolismType } = user;
 
@@ -117,69 +115,72 @@ const generateRecommendedMenu = (user: UserProfile): MealItem[] => {
   const dinnerCal = Math.round(targetCalories * 0.3);
 
   if (metabolismType === 'lipid') {
-    // 脂質代謝低下タイプ向け（低脂質・高タンパク）
     return [
       {
         id: `rec-b-${Date.now()}`,
         category: '朝食',
-        name: '【高タンパク和朝食】鮭の塩焼き・玄米ご飯（中盛）・なめこ味噌汁・ノンオイルツナ和え',
+        name: '【高タンパク和朝食】鮭の塩焼き・玄米ご飯・なめこ味噌汁・ノンオイルツナ和え',
         calories: breakfastCal,
         p: Math.round((breakfastCal * 0.3) / 4),
         f: Math.round((breakfastCal * 0.18) / 9),
         c: Math.round((breakfastCal * 0.52) / 4),
+        recipe: '①鮭はクッキングシートを敷いたフライパンで油を使わずに焼く。②ツナ水煮缶の水気を切り、ポン酢と小ネギで和える。③温かい玄米ご飯（中盛）となめこの味噌汁を添える。',
       },
       {
         id: `rec-l-${Date.now()}`,
         category: '昼食',
-        name: '【低脂質クリーンランチ】蒸し鶏胸肉の彩りランチボウル・和風ノンオイルドレッシング・もち麦ご飯',
+        name: '【低脂質クリーンランチ】蒸し鶏胸肉の彩りボウル・もち麦ご飯',
         calories: lunchCal,
         p: Math.round((lunchCal * 0.32) / 4),
         f: Math.round((lunchCal * 0.16) / 9),
         c: Math.round((lunchCal * 0.52) / 4),
+        recipe: '①鶏胸肉（皮なし）に酒を振り、レンジ(600W)で3分加熱してほぐす。②もち麦ご飯の上に、レタス・ブロッコリー・蒸し鶏をのせる。③ノンオイル和風ドレッシングをかける。',
       },
       {
         id: `rec-d-${Date.now()}`,
         category: '夕食',
-        name: '【夜の代謝キープ食】タラと大根の和風寄せ鍋（豆腐・野菜たっぷり）・小海老の酢の物',
+        name: '【夜の代謝キープ食】タラと大根の和風寄せ鍋・小海老の酢の物',
         calories: dinnerCal,
         p: Math.round((dinnerCal * 0.3) / 4),
         f: Math.round((dinnerCal * 0.18) / 9),
         c: Math.round((dinnerCal * 0.52) / 4),
+        recipe: '①和風出汁に大根・豆腐・キノコ・タラを入れて煮込む。②きゅうりとボイル小海老を三杯酢で和えて副菜にする。③鍋の締めはうどん等にせず具材を中心に食べる。',
       },
     ];
   } else if (metabolismType === 'carb') {
-    // 糖質吸収過多タイプ向け（低GI・適性糖質）
     return [
       {
         id: `rec-b-${Date.now()}`,
         category: '朝食',
-        name: '【低GIエナジー】プロテインオートミールボウル・ミックスベリー・素焼きアーモンド5粒',
+        name: '【低GIエナジー】プロテインオートミールボウル・アーモンド添え',
         calories: breakfastCal,
         p: Math.round((breakfastCal * 0.3) / 4),
         f: Math.round((breakfastCal * 0.28) / 9),
         c: Math.round((breakfastCal * 0.42) / 4),
+        recipe: '①オートミール(30g)に水100mlを加えレンジで1分30秒加熱。②水で溶かしたプロテインを混ぜ合わせる。③冷凍ミックスベリーと素焼きアーモンド5粒をトッピング。',
       },
       {
         id: `rec-l-${Date.now()}`,
         category: '昼食',
-        name: '【血糖値安定ランチ】牛赤身ステーキ（150g）・さつまいも添え・具だくさんサラダ',
+        name: '【血糖値安定ランチ】牛赤身ステーキ（150g）・さつまいも・サラダ',
         calories: lunchCal,
         p: Math.round((lunchCal * 0.3) / 4),
         f: Math.round((lunchCal * 0.3) / 9),
         c: Math.round((lunchCal * 0.4) / 4),
+        recipe: '①牛モモ赤身肉をオリーブオイル極少量で焼き、岩塩・胡椒で調味。②蒸し蒸したさつまいも(100g)を主食代わりに添える。③葉物野菜のサラダには塩とレモン汁をかける。',
       },
       {
         id: `rec-d-${Date.now()}`,
         category: '夕食',
-        name: '【満足糖質オフ食】サバの生姜煮・枝豆豆腐・海草ともずくのスープ・十六穀米（少なめ）',
+        name: '【満足糖質オフ食】サバの生姜煮・枝豆豆腐・もずくスープ・十六穀米（少なめ）',
         calories: dinnerCal,
         p: Math.round((dinnerCal * 0.3) / 4),
         f: Math.round((dinnerCal * 0.3) / 9),
         c: Math.round((dinnerCal * 0.4) / 4),
+        recipe: '①サバ切り身を醤油・みりん少々・生姜スライスで煮付ける（ラカント使用がおすすめ）。②市販の枝豆豆腐ともずくスープを合わせる。③十六穀米は軽く小盛り(100g)に制限。',
       },
     ];
   } else {
-    // 筋肉維持・高タンパク標準タイプ
     return [
       {
         id: `rec-b-${Date.now()}`,
@@ -189,42 +190,30 @@ const generateRecommendedMenu = (user: UserProfile): MealItem[] => {
         p: Math.round((breakfastCal * 0.32) / 4),
         f: Math.round((breakfastCal * 0.23) / 9),
         c: Math.round((breakfastCal * 0.45) / 4),
+        recipe: '①フライパンで油を引かずに目玉焼きを2個作る。②全粒粉食パン(1枚)をトーストする。③無糖ギリシャヨーグルト(100g)に蜂蜜を極少量垂らして召し上がる。',
       },
       {
         id: `rec-l-${Date.now()}`,
         category: '昼食',
-        name: '【マッスルパワーランチ】鶏もも肉（皮なし）の照り焼き定食・ご飯普通盛り・豚汁',
+        name: '【マッスルパワーランチ】鶏もも肉（皮なし）の照り焼き定食・豚汁',
         calories: lunchCal,
         p: Math.round((lunchCal * 0.35) / 4),
         f: Math.round((lunchCal * 0.25) / 9),
         c: Math.round((lunchCal * 0.4) / 4),
+        recipe: '①鶏もも肉は皮を取り除き、醤油・酒・エリスリトールで照り焼きにする。②根菜類と豚赤身肉を入れた具だくさん豚汁を作る。③白米は普通盛り(150g)をしっかり摂る。',
       },
       {
         id: `rec-d-${Date.now()}`,
         category: '夕食',
-        name: '【高タンパクディナー】刺身盛り合わせ（まぐろ・サーモン）・納豆・冷奴・野菜スープ',
+        name: '【高タンパクディナー】刺身盛り合わせ・納豆・冷奴・野菜スープ',
         calories: dinnerCal,
         p: Math.round((dinnerCal * 0.35) / 4),
         f: Math.round((dinnerCal * 0.25) / 9),
         c: Math.round((dinnerCal * 0.4) / 4),
+        recipe: '①マグロ・赤身中心の刺身パックをお皿に盛る。②絹ごし豆腐にネギと醤油をかけ、納豆を添える。③コンソメとキャベツ・玉ねぎでノンオイルスープを作る。',
       },
     ];
   }
-};
-
-const getGameRank = (accumulatedCalories: number, totalGoalCalories: number) => {
-  const burnedFatKg = (accumulatedCalories / 7200).toFixed(2);
-  const butterCount = Math.floor(accumulatedCalories / 1500);
-  const expLevel = Math.floor(accumulatedCalories / 1000) + 1;
-  const progressPercent = Math.min(Math.round((accumulatedCalories / Math.max(totalGoalCalories, 1)) * 100), 100);
-
-  let title = '減量チャレンジャー';
-  if (expLevel >= 20) title = 'ロジカル・マスター';
-  else if (expLevel >= 15) title = '代謝コマンダー';
-  else if (expLevel >= 10) title = '体脂肪ハンター';
-  else if (expLevel >= 5) title = 'アンダーカロリーナイト';
-
-  return { burnedFatKg, butterCount, expLevel, title, progressPercent };
 };
 
 const INITIAL_USERS: Record<string, UserProfile> = {
@@ -246,9 +235,17 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetP: 108,
     targetF: 29,
     targetC: 188,
-    accumulatedDeficitCalories: 12800,
     todayMeals: [
-      { id: 'm1', category: '朝食', name: '鮭塩焼き・玄米ご飯・味噌汁', calories: 420, p: 28, f: 10, c: 55 },
+      {
+        id: 'm1',
+        category: '朝食',
+        name: '鮭塩焼き・玄米ご飯・味噌汁',
+        calories: 420,
+        p: 28,
+        f: 10,
+        c: 55,
+        recipe: '鮭をノンオイルで焼き、温かい玄米ご飯となめこの味噌汁を添える。',
+      },
     ],
     adviceMessage: '佐藤様は脂質代謝低下タイプです。最低ラインである基礎代謝（1,260kcal）をしっかり超えつつ、適正カロリー内でコントロールできています！',
   },
@@ -270,7 +267,6 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetP: 138,
     targetF: 61,
     targetC: 185,
-    accumulatedDeficitCalories: 21500,
     todayMeals: [],
     adviceMessage: '田中様は糖質タイプです。基礎代謝1,580kcalを切ると筋肉量が落ちて代謝が低下します。夕食でしっかりタンパク質を補給してください！',
   },
@@ -292,7 +288,6 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<MealItem | null>(null);
 
-  // 迷った時のメニュー提案モーダル
   const [isMenuSuggestionModalOpen, setIsMenuSuggestionModalOpen] = useState(false);
   const [suggestedMenu, setSuggestedMenu] = useState<MealItem[]>([]);
 
@@ -303,9 +298,6 @@ export default function App() {
   const currentP = currentUser.todayMeals.reduce((acc, m) => acc + m.p, 0);
   const currentF = currentUser.todayMeals.reduce((acc, m) => acc + m.f, 0);
   const currentC = currentUser.todayMeals.reduce((acc, m) => acc + m.c, 0);
-
-  const totalGoalDeficit = (currentUser.weight - currentUser.targetWeight) * 7200;
-  const gameInfo = getGameRank(currentUser.accumulatedDeficitCalories, totalGoalDeficit);
 
   const isBelowBmr = currentCalories < currentUser.bmr;
 
@@ -349,14 +341,12 @@ export default function App() {
     showToast('基礎代謝・適正カロリーの再計算が完了しました！');
   };
 
-  // 迷った時の献立生成発動
   const handleOpenMenuSuggestion = () => {
     const menu = generateRecommendedMenu(currentUser);
     setSuggestedMenu(menu);
     setIsMenuSuggestionModalOpen(true);
   };
 
-  // 提案献立を一括適用
   const handleApplySuggestedMenu = () => {
     setUsers((prev) => ({
       ...prev,
@@ -386,6 +376,7 @@ export default function App() {
         p: 34,
         f: 18,
         c: 68,
+        recipe: '豚ロース薄切り肉を玉ねぎ・生姜醤油で炒める。キャベツの千切りと冷奴を添える。',
       });
       showToast('AI解析が完了しました');
     }, 1200);
@@ -443,8 +434,8 @@ export default function App() {
               S
             </div>
             <div>
-              <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 PFC管理</h1>
-              <p className="text-[10px] text-slate-500 font-medium">ロジカルダイエット 安全設計システム</p>
+              <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 PFC管理（スタッフ専用）</h1>
+              <p className="text-[10px] text-slate-500 font-medium">ロジカルダイエット 安全設計カルテ</p>
             </div>
           </div>
 
@@ -466,30 +457,25 @@ export default function App() {
 
       {/* メイン */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6 space-y-6">
-        {/* ゲーム進捗ダッシュボード */}
-        <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 shadow-xl border border-slate-800 space-y-6 relative overflow-hidden">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-400 to-orange-500 flex items-center justify-center text-slate-900 font-black text-2xl shadow-lg border-2 border-amber-300">
-                Lv.{gameInfo.expLevel}
+        {/* スタッフ用カルテダッシュボード */}
+        <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl border border-slate-800 space-y-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-0.5 rounded-full">
+                  {currentUser.metabolismTypeName}
+                </span>
+                <span className="text-xs text-slate-400">{currentUser.age}歳 / {currentUser.gender === 'female' ? '女性' : '男性'} / {currentUser.height}cm</span>
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40 px-3 py-0.5 rounded-full flex items-center gap-1">
-                    <Shield className="w-3 h-3" />
-                    {gameInfo.title}
-                  </span>
-                  <span className="text-xs text-slate-400">{currentUser.metabolismTypeName}</span>
-                </div>
-                <h2 className="text-2xl font-black text-white mt-1">{currentUser.name} 様の分析結果</h2>
-              </div>
+              <h2 className="text-2xl font-black text-white">{currentUser.name} 様の食事指導カルテ</h2>
             </div>
 
+            {/* アクションボタン */}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={handleOpenMenuSuggestion}
-                className="px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-900 font-black text-xs shadow-md transition-all flex items-center gap-2 border border-amber-300"
+                className="px-4 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-900 font-black text-xs shadow-md transition-all flex items-center gap-2"
               >
                 <ChefHat className="w-4 h-4 text-slate-900" />
                 <span>🎯 迷ったらコレ！本日の推奨献立</span>
@@ -498,118 +484,63 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsCalcModalOpen(true)}
-                className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 border border-slate-700"
+                className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-all flex items-center gap-2 border border-slate-700"
               >
                 <Calculator className="w-4 h-4 text-emerald-400" />
-                <span>目標計算</span>
+                <span>数値再計算</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setIsAiModalOpen(true)}
-                className="px-4 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2"
+                className="px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all flex items-center gap-2"
               >
-                <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                <Sparkles className="w-4 h-4 text-amber-300" />
                 <span>AI食事解析</span>
               </button>
             </div>
           </div>
 
-          {/* 消費実績可視化カード 3連 */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10">
-            <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 flex items-center gap-4">
-              <div className="p-3 bg-rose-500/20 text-rose-400 rounded-xl">
-                <Flame className="w-6 h-6" />
-              </div>
-              <div>
-                <span className="text-[11px] font-bold text-slate-300 block">累計撃退エネルギー</span>
-                <span className="text-xl font-black text-amber-300">
-                  {currentUser.accumulatedDeficitCalories.toLocaleString()} <span className="text-xs text-white">kcal</span>
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 flex items-center gap-4">
-              <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-xl">
-                <Zap className="w-6 h-6" />
-              </div>
-              <div>
-                <span className="text-[11px] font-bold text-slate-300 block">純粋体脂肪カット量</span>
-                <span className="text-xl font-black text-emerald-400">
-                  -{gameInfo.burnedFatKg} <span className="text-xs text-white">kg</span>
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 flex items-center gap-4">
-              <div className="p-3 bg-amber-500/20 text-amber-400 rounded-xl">
-                <Award className="w-6 h-6" />
-              </div>
-              <div>
-                <span className="text-[11px] font-bold text-slate-300 block">身近な例え（バター換算）</span>
-                <span className="text-xl font-black text-amber-400">
-                  バター約 {gameInfo.butterCount} 箱分 <span className="text-xs text-white">消滅</span>
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* 最終目標ゲージ */}
-          <div className="space-y-2 relative z-10 bg-black/20 p-4 rounded-2xl border border-white/5">
-            <div className="flex justify-between items-center text-xs font-bold">
-              <span className="text-slate-300 flex items-center gap-1.5">
-                <Trophy className="w-4 h-4 text-amber-400" />
-                【目標】体脂肪 {currentUser.weight - currentUser.targetWeight}kg 撃退クエスト
+          {/* 会員基本数値サマリー */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
+              <span className="text-[11px] text-slate-400 block font-bold">現在の体重 / 目標体重</span>
+              <span className="text-lg font-black text-white mt-1 block">
+                {currentUser.weight} kg <span className="text-xs text-slate-400 font-normal">→ {currentUser.targetWeight} kg</span>
               </span>
-              <span className="text-amber-400 font-black">{gameInfo.progressPercent}% 達成</span>
             </div>
-            <div className="w-full bg-slate-800 h-3.5 rounded-full overflow-hidden p-0.5 border border-slate-700">
-              <div
-                className="bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400 h-full rounded-full transition-all duration-700 shadow-lg"
-                style={{ width: `${gameInfo.progressPercent}%` }}
-              ></div>
+
+            <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
+              <span className="text-[11px] text-slate-400 block font-bold">減量目標ペース</span>
+              <span className="text-lg font-black text-emerald-400 mt-1 block">
+                -{currentUser.weight - currentUser.targetWeight} kg <span className="text-xs text-slate-400 font-normal">({currentUser.targetMonths}ヶ月間)</span>
+              </span>
+            </div>
+
+            <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
+              <span className="text-[11px] text-rose-300 block font-bold">基礎代謝（最低ライン）</span>
+              <span className="text-lg font-black text-rose-400 mt-1 block">
+                {currentUser.bmr} <span className="text-xs text-slate-400 font-normal">kcal/日</span>
+              </span>
+            </div>
+
+            <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
+              <span className="text-[11px] text-amber-300 block font-bold">1日の適正目標カロリー</span>
+              <span className="text-lg font-black text-amber-400 mt-1 block">
+                {currentUser.targetCalories} <span className="text-xs text-slate-400 font-normal">kcal/日</span>
+              </span>
             </div>
           </div>
         </div>
 
-        {/* 🚨 基礎代謝最低ライン ＆ 適正カロリー表示エリア */}
+        {/* 摂取状況＆PFCバランス */}
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
             <div className="flex items-center gap-2">
-              <HeartPulse className="w-5 h-5 text-rose-500" />
-              <h3 className="font-bold text-slate-800 text-base">カロリー指標（最低ライン vs 適正目標）</h3>
+              <Activity className="w-5 h-5 text-emerald-600" />
+              <h3 className="font-bold text-slate-800 text-base">本日の摂取カロリー・PFCバランス進捗</h3>
             </div>
-            <span className="text-xs text-slate-500 font-medium">※不健康な食べないダイエットを防止する安全基準</span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <AlertTriangle className="w-4 h-4 text-rose-600" />
-                  <span className="text-xs font-black text-rose-900">基礎代謝量（絶対最低ライン）</span>
-                </div>
-                <p className="text-[11px] text-rose-700">これ未満に減らすと代謝低下・リバウンド危険</p>
-              </div>
-              <div className="text-right">
-                <span className="text-2xl font-black text-rose-600">{currentUser.bmr}</span>
-                <span className="text-xs font-bold text-rose-800 ml-1">kcal/日</span>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Target className="w-4 h-4 text-emerald-600" />
-                  <span className="text-xs font-black text-emerald-900">適正目標カロリー</span>
-                </div>
-                <p className="text-[11px] text-emerald-700">脂肪のみを健康的に燃やす推奨ライン</p>
-              </div>
-              <div className="text-right">
-                <span className="text-2xl font-black text-emerald-600">{currentUser.targetCalories}</span>
-                <span className="text-xs font-bold text-emerald-800 ml-1">kcal/日</span>
-              </div>
-            </div>
+            <span className="text-xs text-slate-500 font-medium">※基礎代謝未満の危険制限をチェック</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -636,12 +567,12 @@ export default function App() {
               {isBelowBmr ? (
                 <div className="bg-rose-500/20 text-rose-300 text-[10px] font-bold p-2 rounded-xl border border-rose-500/30 flex items-center gap-1">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  <span>基礎代謝未満！しっかり食べて代謝維持</span>
+                  <span>基礎代謝未満（要食事推奨）</span>
                 </div>
               ) : (
                 <div className="bg-emerald-500/20 text-emerald-300 text-[10px] font-bold p-2 rounded-xl border border-emerald-500/30 flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                  <span>最低ラインクリア（安全圏内）</span>
+                  <span>安全摂取域クリア</span>
                 </div>
               )}
             </div>
@@ -698,43 +629,43 @@ export default function App() {
           </div>
         </div>
 
-        {/* 食事ログ */}
+        {/* 食事ログ（作り方付き表示） */}
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2">
               <Utensils className="w-5 h-5 text-emerald-600" />
-              <h3 className="font-bold text-slate-800 text-base">{currentUser.name} 様の本日ログ</h3>
+              <h3 className="font-bold text-slate-800 text-base">{currentUser.name} 様の本日登録データ</h3>
             </div>
             <span className="text-xs text-slate-400 font-bold">{currentUser.todayMeals.length} 件記録</span>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             {currentUser.todayMeals.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-6">本日の食事ログはまだありません。「🎯 迷ったらコレ！」または「AI食事解析」から追加してください。</p>
+              <p className="text-xs text-slate-400 text-center py-6">本日の食事ログはまだありません。「🎯 迷ったらコレ！」または「AI食事解析」から登録してください。</p>
             ) : (
               currentUser.todayMeals.map((meal) => (
                 <div
                   key={meal.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-all gap-2"
+                  className="p-4 rounded-2xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-all space-y-2"
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-emerald-800 bg-emerald-100/80 px-2.5 py-1 rounded-lg shrink-0">
-                      {meal.category}
-                    </span>
-                    <span className="text-xs font-bold text-slate-800">{meal.name}</span>
-                  </div>
-
-                  <div className="flex items-center gap-4 text-xs font-medium text-slate-600 justify-between sm:justify-end">
-                    <div className="flex items-center gap-3">
-                      <span className="font-black text-slate-800">{meal.calories} kcal</span>
-                      <div className="flex gap-2 text-[11px]">
-                        <span className="text-indigo-600 font-bold">P:{meal.p}g</span>
-                        <span className="text-amber-600 font-bold">F:{meal.f}g</span>
-                        <span className="text-emerald-600 font-bold">C:{meal.c}g</span>
-                      </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xs font-bold text-emerald-800 bg-emerald-100/80 px-2.5 py-0.5 rounded-lg shrink-0">
+                        {meal.category}
+                      </span>
+                      <span className="text-xs font-black text-slate-800">{meal.name}</span>
                     </div>
 
-                    <div className="flex items-center gap-1 border-l border-slate-200 pl-3">
+                    <div className="flex items-center gap-3 text-xs font-medium text-slate-600 justify-between sm:justify-end">
+                      <div className="flex items-center gap-3">
+                        <span className="font-black text-slate-800">{meal.calories} kcal</span>
+                        <div className="flex gap-2 text-[11px]">
+                          <span className="text-indigo-600 font-bold">P:{meal.p}g</span>
+                          <span className="text-amber-600 font-bold">F:{meal.f}g</span>
+                          <span className="text-emerald-600 font-bold">C:{meal.c}g</span>
+                        </div>
+                      </div>
+
                       <button
                         type="button"
                         onClick={() => handleDeleteMeal(meal.id)}
@@ -744,41 +675,50 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+
+                  {meal.recipe && (
+                    <div className="bg-white p-3 rounded-xl border border-slate-200/80 text-xs text-slate-600 space-y-1">
+                      <span className="font-bold text-emerald-700 flex items-center gap-1 text-[11px]">
+                        <BookOpen className="w-3.5 h-3.5" /> 調理手順・ポイント
+                      </span>
+                      <p className="text-[11px] leading-relaxed text-slate-600">{meal.recipe}</p>
+                    </div>
+                  )}
                 </div>
               ))
             )}
           </div>
         </div>
 
-        {/* LINE指導 */}
+        {/* LINE指導用テンプレート */}
         <div className="p-6 rounded-3xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <MessageSquare className="w-5 h-5" />
-              <h3 className="font-bold text-base">ロジカルLINE指導アシスタント</h3>
+              <h3 className="font-bold text-base">会員様送信用 LINEフィードバック生成</h3>
             </div>
-            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">安全ガイド連動</span>
+            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">ワンタップコピー</span>
           </div>
-          <p className="text-xs text-emerald-100 leading-relaxed bg-black/10 p-3.5 rounded-2xl border border-white/10">
+          <p className="text-xs text-emerald-100 leading-relaxed bg-black/10 p-3.5 rounded-2xl border border-white/10 font-mono">
             {currentUser.adviceMessage}
           </p>
           <div className="flex justify-end pt-1">
             <button
               type="button"
               onClick={() => showToast('アドバイス文章をコピーしました')}
-              className="px-4 py-2.5 rounded-xl bg-white text-emerald-800 text-xs font-bold flex items-center gap-1.5"
+              className="px-4 py-2.5 rounded-xl bg-white text-emerald-800 text-xs font-bold flex items-center gap-1.5 shadow-sm"
             >
-              <span>LINEアドバイス文をコピー</span>
+              <span>LINE送信テキストをコピー</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </div>
       </main>
 
-      {/* 🎯 迷った時の完全カスタマイズ推奨献立モーダル */}
+      {/* 🎯 迷った時の完全カスタマイズ推奨献立モーダル（作り方付き） */}
       {isMenuSuggestionModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <ChefHat className="w-6 h-6 text-amber-500" />
@@ -794,14 +734,14 @@ export default function App() {
 
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-900 space-y-1">
               <span className="font-black flex items-center gap-1">
-                💡 {currentUser.metabolismTypeName}に最適なPFC比率
+                💡 {currentUser.metabolismTypeName}に最適なPFC比率 & 簡単レシピ付き
               </span>
               <p className="text-[11px] leading-relaxed text-amber-800">
-                食べなさすぎによる基礎代謝低下を防ぎ、脂肪燃焼効率を最大化する「朝30%・昼40%・夜30%」の黄金配分メニューです。
+                「朝30%・昼40%・夜30%」の黄金配分メニューです。各メニューの調理手順も記載していますので、会員様へのご案内にご活用ください。
               </p>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               {suggestedMenu.map((item) => (
                 <div key={item.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
                   <div className="flex items-center justify-between">
@@ -811,11 +751,24 @@ export default function App() {
                     <span className="text-xs font-black text-slate-800">{item.calories} kcal</span>
                   </div>
                   <p className="text-xs font-bold text-slate-800 leading-snug">{item.name}</p>
-                  <div className="flex gap-3 text-[11px] pt-1 text-slate-500 font-medium">
+                  
+                  <div className="flex gap-3 text-[11px] pt-1 text-slate-500 font-medium border-b border-slate-200/60 pb-2">
                     <span>P: <strong className="text-indigo-600">{item.p}g</strong></span>
                     <span>F: <strong className="text-amber-600">{item.f}g</strong></span>
                     <span>C: <strong className="text-emerald-600">{item.c}g</strong></span>
                   </div>
+
+                  {/* 作り方手順表示 */}
+                  {item.recipe && (
+                    <div className="pt-1">
+                      <span className="text-[11px] font-bold text-emerald-800 flex items-center gap-1 mb-1">
+                        <BookOpen className="w-3.5 h-3.5" /> 🍳 簡単作り方・ポイント
+                      </span>
+                      <p className="text-[11px] text-slate-600 leading-relaxed bg-white p-2.5 rounded-xl border border-slate-200/80">
+                        {item.recipe}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1063,7 +1016,7 @@ export default function App() {
 
       {/* フッター */}
       <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
-        サクラ整骨院 PFC Balance Manager (Logical & Safe Edition)
+        サクラ整骨院 PFC Balance Manager (Staff Edition)
       </footer>
     </div>
   );
