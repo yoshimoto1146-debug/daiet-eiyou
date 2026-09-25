@@ -21,6 +21,8 @@ import {
   Zap,
   Shield,
   Award,
+  AlertTriangle,
+  HeartPulse,
 } from 'lucide-react';
 
 type MealCategory = '朝食' | '昼食' | '夕食' | '間食';
@@ -47,11 +49,13 @@ interface UserProfile {
   targetMonths: number;
   metabolismType: 'lipid' | 'carb' | 'muscle';
   metabolismTypeName: string;
-  targetCalories: number;
+  bmr: number; // 基礎代謝量（最低ライン）
+  tdee: number; // 総消費カロリー
+  targetCalories: number; // 適正目標カロリー
   targetP: number;
   targetF: number;
   targetC: number;
-  accumulatedDeficitCalories: number; // 累計カット（消費）成功カロリー
+  accumulatedDeficitCalories: number;
   todayMeals: MealItem[];
   adviceMessage: string;
 }
@@ -67,24 +71,31 @@ const calculateLogicalTargets = (
   targetMonths: number,
   metabolismType: 'lipid' | 'carb' | 'muscle'
 ) => {
+  // 1. 基礎代謝量 (BMR) - ハリス・ベネディクト改訂式
   let bmr = 0;
   if (gender === 'male') {
     bmr = 88.362 + 13.397 * weight + 4.799 * height - 5.677 * age;
   } else {
     bmr = 447.593 + 9.247 * weight + 3.098 * height - 4.33 * age;
   }
+  bmr = Math.round(bmr);
 
-  const tdee = bmr * 1.45;
+  // 2. 総消費カロリー (TDEE) - 身体活動レベル（普通 1.45）
+  const tdee = Math.round(bmr * 1.45);
+
+  // 3. 落とすべき体脂肪量 & 1日あたりの必要アンダーカロリー
   const weightToLose = Math.max(weight - targetWeight, 0);
   const totalDeficitCalories = weightToLose * 7200;
   const days = targetMonths * 30;
   const dailyDeficit = days > 0 ? totalDeficitCalories / days : 0;
 
+  // 4. 適正目標カロリー（※基礎代謝を下回らない安全制御）
   let targetCalories = Math.round(tdee - dailyDeficit);
   if (targetCalories < bmr) {
-    targetCalories = Math.round(bmr);
+    targetCalories = bmr; // 基礎代謝を下回らない安全ガード
   }
 
+  // 5. PFCバランス自動調整（代謝タイプ別）
   let pRatio = 0.25, fRatio = 0.25, cRatio = 0.5;
   if (metabolismType === 'lipid') {
     pRatio = 0.3; fRatio = 0.18; cRatio = 0.52;
@@ -98,13 +109,12 @@ const calculateLogicalTargets = (
   const targetF = Math.round((targetCalories * fRatio) / 9);
   const targetC = Math.round((targetCalories * cRatio) / 4);
 
-  return { targetCalories, targetP, targetF, targetC, bmr: Math.round(bmr), tdee: Math.round(tdee), totalDeficitCalories };
+  return { targetCalories, targetP, targetF, targetC, bmr, tdee };
 };
 
-// ゲーム用ランク計算関数
 const getGameRank = (accumulatedCalories: number, totalGoalCalories: number) => {
   const burnedFatKg = (accumulatedCalories / 7200).toFixed(2);
-  const butterCount = Math.floor(accumulatedCalories / 1500); // バター1箱約1500kcal相当
+  const butterCount = Math.floor(accumulatedCalories / 1500);
   const expLevel = Math.floor(accumulatedCalories / 1000) + 1;
   const progressPercent = Math.min(Math.round((accumulatedCalories / Math.max(totalGoalCalories, 1)) * 100), 100);
 
@@ -130,17 +140,19 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetMonths: 3,
     metabolismType: 'lipid',
     metabolismTypeName: '脂質代謝低下タイプ',
+    bmr: 1260,
+    tdee: 1827,
     targetCalories: 1450,
     targetP: 108,
     targetF: 29,
     targetC: 188,
-    accumulatedDeficitCalories: 12800, // 約1.7kg相当の消費成功
+    accumulatedDeficitCalories: 12800,
     todayMeals: [
       { id: 'm1', category: '朝食', name: '鮭塩焼き・玄米ご飯・味噌汁', calories: 420, p: 28, f: 10, c: 55 },
       { id: 'm2', category: '昼食', name: '蒸し鶏と彩り野菜のサラダボウル', calories: 480, p: 35, f: 12, c: 58 },
       { id: 'm3', category: '間食', name: 'ギリシャヨーグルト・素焼きアーモンド', calories: 150, p: 12, f: 5, c: 12 },
     ],
-    adviceMessage: '佐藤様は脂質代謝低下タイプです。現在バター約8箱分の体脂肪撃退に成功しています！この調子でクエストを進めましょう！',
+    adviceMessage: '佐藤様は脂質代謝低下タイプです。最低ラインである基礎代謝（1,260kcal）をしっかり超えつつ、適正カロリー内でコントロールできています！食べることを恐れずPFCを整えましょう。',
   },
   userB: {
     id: 'userB',
@@ -154,16 +166,18 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetMonths: 3,
     metabolismType: 'carb',
     metabolismTypeName: '糖質吸収過多タイプ',
+    bmr: 1580,
+    tdee: 2291,
     targetCalories: 1850,
     targetP: 138,
     targetF: 61,
     targetC: 185,
-    accumulatedDeficitCalories: 21500, // 約3kg相当の消費成功
+    accumulatedDeficitCalories: 21500,
     todayMeals: [
       { id: 'm5', category: '朝食', name: 'プロテイン・オートミールボウル', calories: 450, p: 35, f: 8, c: 60 },
       { id: 'm6', category: '昼食', name: '牛肉赤身ステーキ定食（ご飯少なめ）', calories: 750, p: 48, f: 28, c: 75 },
     ],
-    adviceMessage: '田中様は糖質タイプです。レベル22突破！現在の体脂肪撃退ペースは非常に論理的かつ好調です！',
+    adviceMessage: '田中様は糖質タイプです。基礎代謝1,580kcalを切ると筋肉量が落ちて代謝が低下します。夕食でしっかりタンパク質を補給してください！',
   },
 };
 
@@ -183,8 +197,6 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<MealItem | null>(null);
 
-  const [editingMeal, setEditingMeal] = useState<MealItem | null>(null);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentUser = users[selectedUserId];
 
@@ -195,6 +207,8 @@ export default function App() {
 
   const totalGoalDeficit = (currentUser.weight - currentUser.targetWeight) * 7200;
   const gameInfo = getGameRank(currentUser.accumulatedDeficitCalories, totalGoalDeficit);
+
+  const isBelowBmr = currentCalories < currentUser.bmr;
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -223,6 +237,8 @@ export default function App() {
       ...prev,
       [selectedUserId]: {
         ...calcForm,
+        bmr: calculated.bmr,
+        tdee: calculated.tdee,
         targetCalories: calculated.targetCalories,
         targetP: calculated.targetP,
         targetF: calculated.targetF,
@@ -231,7 +247,7 @@ export default function App() {
     }));
 
     setIsCalcModalOpen(false);
-    showToast('ロジカル目標の更新が完了しました！');
+    showToast('基礎代謝・適正カロリーの再計算が完了しました！');
   };
 
   const openCalcModal = () => {
@@ -314,7 +330,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 PFC管理</h1>
-              <p className="text-[10px] text-slate-500 font-medium">ロジカルダイエットゲーミフィケーション</p>
+              <p className="text-[10px] text-slate-500 font-medium">ロジカルダイエット 安全設計システム</p>
             </div>
           </div>
 
@@ -334,12 +350,8 @@ export default function App() {
 
       {/* メイン */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6 space-y-6">
-        {/* 🎮 ゲーム風ステータス・進捗ダッシュボード */}
+        {/* ゲーム進捗ダッシュボード */}
         <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 shadow-xl border border-slate-800 space-y-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-            <Trophy className="w-64 h-64 text-amber-400" />
-          </div>
-
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-400 to-orange-500 flex items-center justify-center text-slate-900 font-black text-2xl shadow-lg border-2 border-amber-300">
@@ -353,7 +365,7 @@ export default function App() {
                   </span>
                   <span className="text-xs text-slate-400">{currentUser.metabolismTypeName}</span>
                 </div>
-                <h2 className="text-2xl font-black text-white mt-1">{currentUser.name} 様のクエスト進捗</h2>
+                <h2 className="text-2xl font-black text-white mt-1">{currentUser.name} 様の分析結果</h2>
               </div>
             </div>
 
@@ -364,7 +376,7 @@ export default function App() {
                 className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 border border-slate-700"
               >
                 <Calculator className="w-4 h-4 text-emerald-400" />
-                <span>目標設定</span>
+                <span>目標設定・自動計算</span>
               </button>
               <button
                 type="button"
@@ -416,12 +428,12 @@ export default function App() {
             </div>
           </div>
 
-          {/* クエスト達成プログレスバー */}
+          {/* 最終目標ゲージ */}
           <div className="space-y-2 relative z-10 bg-black/20 p-4 rounded-2xl border border-white/5">
             <div className="flex justify-between items-center text-xs font-bold">
               <span className="text-slate-300 flex items-center gap-1.5">
                 <Trophy className="w-4 h-4 text-amber-400" />
-                【最終目標】体脂肪 {currentUser.weight - currentUser.targetWeight}kg 撃退クエスト
+                【目標】体脂肪 {currentUser.weight - currentUser.targetWeight}kg 撃退クエスト
               </span>
               <span className="text-amber-400 font-black">{gameInfo.progressPercent}% 達成</span>
             </div>
@@ -434,18 +446,50 @@ export default function App() {
           </div>
         </div>
 
-        {/* PFC・本日カロリー */}
+        {/* 🚨 基礎代謝最低ライン ＆ 適正カロリー表示エリア */}
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
-          <div className="flex justify-between items-center pb-3 border-b border-slate-100">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
             <div className="flex items-center gap-2">
-              <Target className="w-5 h-5 text-emerald-600" />
-              <h3 className="font-bold text-slate-800 text-base">本日のエネルギー＆PFCクエスト</h3>
+              <HeartPulse className="w-5 h-5 text-rose-500" />
+              <h3 className="font-bold text-slate-800 text-base">カロリー指標（最低ライン vs 適正目標）</h3>
             </div>
-            <span className="text-xs font-bold text-slate-500">
-              上限目標: <strong className="text-emerald-600">{currentUser.targetCalories}</strong> kcal/日
-            </span>
+            <span className="text-xs text-slate-500 font-medium">※不健康な食べないダイエットを防止する安全基準</span>
           </div>
 
+          {/* カロリー比較カード 2連 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 1. 基礎代謝量（最低ライン） */}
+            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <AlertTriangle className="w-4 h-4 text-rose-600" />
+                  <span className="text-xs font-black text-rose-900">基礎代謝量（絶対最低ライン）</span>
+                </div>
+                <p className="text-[11px] text-rose-700">これ未満に減らすと代謝低下・リバウンド危険</p>
+              </div>
+              <div className="text-right">
+                <span className="text-2xl font-black text-rose-600">{currentUser.bmr}</span>
+                <span className="text-xs font-bold text-rose-800 ml-1">kcal/日</span>
+              </div>
+            </div>
+
+            {/* 2. 適正目標カロリー */}
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Target className="w-4 h-4 text-emerald-600" />
+                  <span className="text-xs font-black text-emerald-900">適正目標カロリー</span>
+                </div>
+                <p className="text-[11px] text-emerald-700">脂肪のみを健康的に燃やす推奨ライン</p>
+              </div>
+              <div className="text-right">
+                <span className="text-2xl font-black text-emerald-600">{currentUser.targetCalories}</span>
+                <span className="text-xs font-bold text-emerald-800 ml-1">kcal/日</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 本日の進捗メーター（基礎代謝判定バッジ付き） */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-slate-900 text-white p-5 rounded-2xl flex flex-col justify-between shadow-inner">
               <div className="flex items-center justify-between">
@@ -459,17 +503,29 @@ export default function App() {
                 </div>
                 <div className="w-full bg-slate-800 h-2.5 rounded-full mt-3 overflow-hidden">
                   <div
-                    className="bg-gradient-to-r from-amber-400 to-orange-500 h-full rounded-full transition-all duration-500"
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      isBelowBmr ? 'bg-rose-500' : 'bg-gradient-to-r from-amber-400 to-emerald-400'
+                    }`}
                     style={{ width: `${calPercent}%` }}
                   ></div>
                 </div>
               </div>
-              <div className="flex justify-between text-xs text-slate-400 font-bold">
-                <span>消化率</span>
-                <span className="text-amber-400">{calPercent}%</span>
-              </div>
+
+              {/* 最低ライン警告判定 */}
+              {isBelowBmr ? (
+                <div className="bg-rose-500/20 text-rose-300 text-[10px] font-bold p-2 rounded-xl border border-rose-500/30 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>基礎代謝未満！しっかり食べて代謝維持</span>
+                </div>
+              ) : (
+                <div className="bg-emerald-500/20 text-emerald-300 text-[10px] font-bold p-2 rounded-xl border border-emerald-500/30 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>最低ラインクリア（安全圏内）</span>
+                </div>
+              )}
             </div>
 
+            {/* PFC 3項目 */}
             <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-2xl flex flex-col justify-between">
                 <div>
@@ -577,7 +633,7 @@ export default function App() {
               <MessageSquare className="w-5 h-5" />
               <h3 className="font-bold text-base">ロジカルLINE指導アシスタント</h3>
             </div>
-            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">ゲーム判定連動</span>
+            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">安全ガイド連動</span>
           </div>
           <p className="text-xs text-emerald-100 leading-relaxed bg-black/10 p-3.5 rounded-2xl border border-white/10">
             {currentUser.adviceMessage}
@@ -595,14 +651,14 @@ export default function App() {
         </div>
       </main>
 
-      {/* モーダル群 (略同機能) */}
+      {/* 目標・基礎代謝自動計算モーダル */}
       {isCalcModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <Calculator className="w-5 h-5 text-emerald-600" />
-                <h3 className="font-black text-slate-800 text-base">ロジカル目標自動計算</h3>
+                <h3 className="font-black text-slate-800 text-base">基礎代謝・適正目標カロリー設定</h3>
               </div>
               <button type="button" onClick={() => setIsCalcModalOpen(false)} className="p-1 rounded-full text-slate-400">
                 <X className="w-5 h-5" />
@@ -702,14 +758,14 @@ export default function App() {
                 onClick={handleSaveLogicalTargets}
                 className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-sm"
               >
-                目標設定を保存
+                再計算して設定保存
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* AIモーダル */}
+      {/* AI解析モーダル */}
       {isAiModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5">
@@ -817,7 +873,7 @@ export default function App() {
 
       {/* フッター */}
       <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
-        サクラ整骨院 PFC Balance Manager (Gamified Edition)
+        サクラ整骨院 PFC Balance Manager (Logical & Safe Edition)
       </footer>
     </div>
   );
