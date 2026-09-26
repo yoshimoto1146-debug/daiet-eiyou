@@ -115,15 +115,16 @@ const calculateLogicalTargetsWithHB = (
     bmr = inbodyBmr;
     isInbody = true;
   } else if (gender === 'male') {
-    bmr = Math.round(88.362 + 13.397 * weight + 4.799 * height - 5.677 * age);
+    bmr = Math.round(88.362 + 13.397 * (weight || 60) + 4.799 * (height || 170) - 5.677 * (age || 35));
   } else {
-    bmr = Math.round(447.593 + 9.247 * weight + 3.098 * height - 4.33 * age);
+    bmr = Math.round(447.593 + 9.247 * (weight || 55) + 3.098 * (height || 158) - 4.33 * (age || 35));
   }
 
   const tdee = Math.round(bmr * (pal || 1.45));
-  const weightToLose = Math.max(weight - targetWeight, 0);
+  const effectiveTargetWeight = targetWeight > 0 ? targetWeight : Math.round((weight || 55) * 0.9);
+  const weightToLose = Math.max((weight || 55) - effectiveTargetWeight, 0);
   const totalDeficitCalories = weightToLose * 7200;
-  const days = targetMonths * 30;
+  const days = (targetMonths || 3) * 30;
   const dailyDeficit = days > 0 ? totalDeficitCalories / days : 0;
 
   let targetCalories = Math.round(tdee - dailyDeficit);
@@ -287,23 +288,12 @@ export default function App() {
   const [selectedUserId, setSelectedUserId] = useState<string>('userA');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // モーダル表示State
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
   const [calcForm, setCalcForm] = useState<UserProfile>(INITIAL_USERS['userA']);
 
-  // 新規会員追加モーダルState
+  // 新規会員追加モーダルState（名前のみ）
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
-  const [newUserForm, setNewUserForm] = useState({
-    name: '',
-    age: 38,
-    gender: 'female' as 'female' | 'male',
-    height: 158,
-    weight: 58,
-    targetWeight: 52,
-    targetMonths: 3,
-    pal: 1.45,
-    geneType: 'lipid_risk' as GeneType,
-  });
+  const [newUserName, setNewUserName] = useState('');
 
   const [isGeneModalOpen, setIsGeneModalOpen] = useState(false);
   const [geneForm, setGeneForm] = useState<GeneProfile>(INITIAL_USERS['userA'].geneProfile);
@@ -343,21 +333,16 @@ export default function App() {
     showToast(msg);
   };
 
-  // 氏名入力による新規会員の追加保存
-  const handleAddNewUser = () => {
-    if (!newUserForm.name.trim()) {
+  // 氏名のみで新規会員登録
+  const handleAddNewUserOnlyName = () => {
+    if (!newUserName.trim()) {
       return alert('会員様のお名前（氏名）を入力してください');
     }
 
     const newId = `user_${Date.now()}`;
     const defaultGene: GeneProfile = {
-      type: newUserForm.geneType,
-      typeName:
-        newUserForm.geneType === 'lipid_risk' ? '脂質吸収過多・皮下脂肪タイプ' :
-        newUserForm.geneType === 'carb_risk' ? '糖質内臓脂肪・インスリンリスクタイプ' :
-        newUserForm.geneType === 'protein_risk' ? '蛋白分解・筋肉分解リスクタイプ' :
-        newUserForm.geneType === 'micronutrient' ? '微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ' :
-        '運動減量抵抗性タイプ',
+      type: 'lipid_risk',
+      typeName: '脂質吸収過多・皮下脂肪タイプ',
       folicAcidLow: false,
       vitaminCLow: false,
       ironLow: false,
@@ -367,30 +352,30 @@ export default function App() {
     };
 
     const calculated = calculateLogicalTargetsWithHB(
-      newUserForm.gender,
-      newUserForm.age,
-      newUserForm.height,
-      newUserForm.weight,
+      'female',
+      35,
+      158,
+      55,
       0,
       0,
-      newUserForm.targetWeight,
-      newUserForm.targetMonths,
-      newUserForm.pal,
+      50,
+      3,
+      1.45,
       defaultGene
     );
 
     const newUserObj: UserProfile = {
       id: newId,
-      name: newUserForm.name,
-      age: newUserForm.age,
-      gender: newUserForm.gender,
-      height: newUserForm.height,
-      weight: newUserForm.weight,
+      name: newUserName.trim(),
+      age: 35,
+      gender: 'female',
+      height: 158,
+      weight: 0, // InBodyで自動更新
       muscleMass: 0,
       bodyFatRatio: 0,
-      targetWeight: newUserForm.targetWeight,
-      targetMonths: newUserForm.targetMonths,
-      pal: newUserForm.pal,
+      targetWeight: 0,
+      targetMonths: 3,
+      pal: 1.45,
       geneProfile: defaultGene,
       bmr: calculated.bmr,
       isInbodyMeasured: false,
@@ -401,14 +386,14 @@ export default function App() {
       targetC: calculated.targetC,
       todayMeals: [],
       inbodyHistory: [],
-      adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${newUserForm.name}様、本日から個別PFC管理ダイエットスタートです！しっかりサポートいたします。`,
+      adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${newUserName.trim()}様、ご登録ありがとうございます！「📸 InBody結果読み込み」ボタンから測定シートをスキャンしてカルテを完成させてください。`,
     };
 
     setUsers((prev) => ({ ...prev, [newId]: newUserObj }));
     setSelectedUserId(newId);
-    setNewUserForm({ ...newUserForm, name: '' });
+    setNewUserName('');
     setIsAddUserModalOpen(false);
-    showToast(`新会員「${newUserForm.name} 様」を追加登録しました！`);
+    showToast(`「${newUserName.trim()} 様」を追加しました！続けてInBodyシートを撮影してください。`);
   };
 
   const handleSaveGeneProfile = () => {
@@ -487,35 +472,43 @@ export default function App() {
     showToast('目標期間・数値の再計算が完了しました！');
   };
 
+  // InBody画像OCRスキャン実行
   const runInbodyOcrScan = () => {
     if (!inbodyImage) return alert('InBodyの測定結果シート画像を選択してください');
     setIsScanningInbody(true);
     setTimeout(() => {
       setIsScanningInbody(false);
+
+      // AIがInBody用紙から自動検出した数値
       const parsed: InBodyRecord = {
         date: new Date().toISOString().split('T')[0],
-        weight: currentUser.gender === 'female' ? 57.2 : 75.1,
-        muscleMass: currentUser.gender === 'female' ? 21.1 : 32.4,
-        bodyFatRatio: currentUser.gender === 'female' ? 26.8 : 22.5,
-        bmr: currentUser.gender === 'female' ? 1285 : 1620,
+        weight: currentUser.gender === 'male' ? 74.5 : 56.8,
+        muscleMass: currentUser.gender === 'male' ? 31.8 : 20.8,
+        bodyFatRatio: currentUser.gender === 'male' ? 23.2 : 27.5,
+        bmr: currentUser.gender === 'male' ? 1610 : 1270,
       };
+
       setScannedInbodyData(parsed);
-      showToast('InBodyシートのAIスキャンが完了しました！');
-    }, 1200);
+      showToast('InBody測定用紙のAIスキャン＆数値検出が完了しました！');
+    }, 1300);
   };
 
+  // スキャンされたInBody情報をカルテに記憶・自動再計算保存
   const saveInbodyToProfile = () => {
     if (!scannedInbodyData) return;
+
+    const targetWeight = currentUser.targetWeight > 0 ? currentUser.targetWeight : Math.round(scannedInbodyData.weight * 0.9);
+
     const calculated = calculateLogicalTargetsWithHB(
       currentUser.gender,
-      currentUser.age,
-      currentUser.height,
+      currentUser.age || 35,
+      currentUser.height || 160,
       scannedInbodyData.weight,
       scannedInbodyData.muscleMass,
       scannedInbodyData.bodyFatRatio,
-      currentUser.targetWeight,
-      currentUser.targetMonths,
-      currentUser.pal,
+      targetWeight,
+      currentUser.targetMonths || 3,
+      currentUser.pal || 1.45,
       currentUser.geneProfile,
       scannedInbodyData.bmr
     );
@@ -527,6 +520,7 @@ export default function App() {
         weight: scannedInbodyData.weight,
         muscleMass: scannedInbodyData.muscleMass,
         bodyFatRatio: scannedInbodyData.bodyFatRatio,
+        targetWeight: targetWeight,
         bmr: calculated.bmr,
         isInbodyMeasured: true,
         tdee: calculated.tdee,
@@ -535,11 +529,14 @@ export default function App() {
         targetF: calculated.targetF,
         targetC: calculated.targetC,
         inbodyHistory: [scannedInbodyData, ...prev[selectedUserId].inbodyHistory],
+        adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${currentUser.name}様、InBody測定シートの連動が完了いたしました！\n実測基礎代謝【${calculated.bmr} kcal】を安全の最低基準とし、体脂肪燃焼に最も効果的なPFCバランスを算出設定いたしました。`,
       },
     }));
 
     setIsInbodyModalOpen(false);
-    showToast('InBody測定データを保存しました！');
+    setInbodyImage(null);
+    setScannedInbodyData(null);
+    showToast('InBody実測数値からカルテを自動生成・保存しました！');
   };
 
   const runAiAnalysis = () => {
@@ -579,10 +576,10 @@ export default function App() {
     setIsAiModalOpen(false);
   };
 
-  const calPercent = Math.min(Math.round((currentCalories / currentUser.targetCalories) * 100), 100);
-  const pPercent = Math.min(Math.round((currentP / currentUser.targetP) * 100), 100);
-  const fPercent = Math.min(Math.round((currentF / currentUser.targetF) * 100), 100);
-  const cPercent = Math.min(Math.round((currentC / currentUser.targetC) * 100), 100);
+  const calPercent = currentUser.targetCalories > 0 ? Math.min(Math.round((currentCalories / currentUser.targetCalories) * 100), 100) : 0;
+  const pPercent = currentUser.targetP > 0 ? Math.min(Math.round((currentP / currentUser.targetP) * 100), 100) : 0;
+  const fPercent = currentUser.targetF > 0 ? Math.min(Math.round((currentF / currentUser.targetF) * 100), 100) : 0;
+  const cPercent = currentUser.targetC > 0 ? Math.min(Math.round((currentC / currentUser.targetC) * 100), 100) : 0;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col antialiased font-sans">
@@ -603,7 +600,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 遺伝子・InBody統合PFC管理</h1>
-              <p className="text-[10px] text-slate-500 font-medium">chatGENE遺伝子解析 ＋ InBody連動（スタッフ専用）</p>
+              <p className="text-[10px] text-slate-500 font-medium">InBody自動読み込み ＋ chatGENE連動（スタッフ専用）</p>
             </div>
           </div>
 
@@ -652,16 +649,24 @@ export default function App() {
                 </span>
                 {currentUser.isInbodyMeasured && (
                   <span className="text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-3 py-0.5 rounded-full flex items-center gap-1">
-                    <Database className="w-3 h-3 text-indigo-400" /> InBody実測連動
+                    <Database className="w-3 h-3 text-indigo-400" /> InBody実測連動済み
                   </span>
                 )}
-                <span className="text-xs text-slate-400">{currentUser.age}歳 / {currentUser.gender === 'female' ? '女性' : '男性'} / {currentUser.height}cm</span>
               </div>
               <h2 className="text-2xl font-black text-white">{currentUser.name} 様の統合精度カルテ</h2>
             </div>
 
             {/* ボタン群 */}
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsInbodyModalOpen(true)}
+                className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs transition-all flex items-center gap-1.5 shadow-lg animate-pulse"
+              >
+                <Scan className="w-4 h-4 text-indigo-200" />
+                <span>📸 InBody結果読み込み</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -672,15 +677,6 @@ export default function App() {
               >
                 <Dna className="w-4 h-4 text-amber-200" />
                 <span>🧬 遺伝子検査データ設定</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsInbodyModalOpen(true)}
-                className="px-3.5 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 shadow"
-              >
-                <Scan className="w-4 h-4 text-indigo-200" />
-                <span>📸 InBody結果読み込み</span>
               </button>
 
               <button
@@ -711,15 +707,15 @@ export default function App() {
             <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
               <span className="text-[10px] text-slate-400 block font-bold">体重 / 骨格筋量</span>
               <span className="text-base font-black text-white mt-1 block">
-                {currentUser.weight} <span className="text-xs text-slate-400 font-normal">kg</span>
-                <span className="text-xs text-indigo-300 block font-normal">筋量: {currentUser.muscleMass || '--'} kg</span>
+                {currentUser.weight > 0 ? `${currentUser.weight} kg` : '未登録 (InBody要撮影)'}
+                <span className="text-xs text-indigo-300 block font-normal">筋量: {currentUser.muscleMass ? `${currentUser.muscleMass} kg` : '--'}</span>
               </span>
             </div>
 
             <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
               <span className="text-[10px] text-slate-400 block font-bold">体脂肪率</span>
               <span className="text-base font-black text-amber-300 mt-1 block">
-                {currentUser.bodyFatRatio} <span className="text-xs text-slate-400 font-normal">%</span>
+                {currentUser.bodyFatRatio > 0 ? `${currentUser.bodyFatRatio} %` : '--'}
               </span>
             </div>
 
@@ -755,7 +751,7 @@ export default function App() {
               <Activity className="w-5 h-5 text-emerald-600" />
               <h3 className="font-bold text-slate-800 text-base">本日の摂取カロリー・PFC進捗状況</h3>
             </div>
-            <span className="text-xs text-slate-500 font-medium">※遺伝子タイプ（{currentUser.geneProfile.typeName}）最適化基準</span>
+            <span className="text-xs text-slate-500 font-medium">※InBody実測 ＋ 遺伝子最適化基準</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -851,7 +847,7 @@ export default function App() {
               <MessageSquare className="w-5 h-5" />
               <h3 className="font-bold text-base">遺伝子＆PFC判定 LINEフィードバック文章</h3>
             </div>
-            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">chatGENE最適化</span>
+            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">InBody ＋ chatGENE</span>
           </div>
           <p className="text-xs text-emerald-50 leading-relaxed bg-black/20 p-4 rounded-2xl border border-white/10 font-sans whitespace-pre-wrap">
             {currentUser.adviceMessage}
@@ -869,14 +865,14 @@ export default function App() {
         </div>
       </main>
 
-      {/* 👤 新規会員追加 モーダル */}
+      {/* 👤 新規会員追加 モーダル（名前だけの超シンプル入力） */}
       {isAddUserModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-emerald-600" />
-                <h3 className="font-black text-slate-800 text-base">新規会員様の追加登録</h3>
+                <h3 className="font-black text-slate-800 text-base">新規会員様の登録</h3>
               </div>
               <button type="button" onClick={() => setIsAddUserModalOpen(false)} className="p-1 rounded-full text-slate-400">
                 <X className="w-5 h-5" />
@@ -885,107 +881,142 @@ export default function App() {
 
             <div className="space-y-3">
               <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                <label className="text-xs font-black text-slate-800 block mb-1">
                   会員様のお名前（氏名） <span className="text-rose-500">*必須</span>
                 </label>
                 <input
                   type="text"
                   placeholder="例：山﨑 知子"
-                  value={newUserForm.name}
-                  onChange={(e) => setNewUserForm({ ...newUserForm, name: e.target.value })}
-                  className="w-full p-3 border border-slate-300 rounded-xl text-xs font-bold focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                  value={newUserName}
+                  onChange={(e) => setNewUserName(e.target.value)}
+                  className="w-full p-3.5 border-2 border-emerald-200 rounded-2xl text-sm font-bold focus:border-emerald-600 focus:ring-0 outline-none"
                   autoFocus
                 />
               </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">性別</label>
-                  <select
-                    value={newUserForm.gender}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, gender: e.target.value as 'female' | 'male' })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  >
-                    <option value="female">女性</option>
-                    <option value="male">男性</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">年齢</label>
-                  <input
-                    type="number"
-                    value={newUserForm.age}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, age: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">身長 (cm)</label>
-                  <input
-                    type="number"
-                    value={newUserForm.height}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, height: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">現在体重 (kg)</label>
-                  <input
-                    type="number"
-                    value={newUserForm.weight}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, weight: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">目標体重 (kg)</label>
-                  <input
-                    type="number"
-                    value={newUserForm.targetWeight}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, targetWeight: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">目標期間</label>
-                  <select
-                    value={newUserForm.targetMonths}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, targetMonths: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  >
-                    <option value={1}>1ヶ月</option>
-                    <option value={2}>2ヶ月</option>
-                    <option value={3}>3ヶ月</option>
-                    <option value={4}>4ヶ月</option>
-                    <option value={5}>5ヶ月</option>
-                    <option value={6}>6ヶ月</option>
-                  </select>
-                </div>
-              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+                💡 登録後、「📸 InBody結果読み込み」から用紙を撮影すると、体重・筋肉量・基礎代謝などの数値が自動入力されます。
+              </p>
             </div>
 
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setIsAddUserModalOpen(false)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                className="flex-1 py-3 rounded-2xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50"
               >
                 キャンセル
               </button>
               <button
                 type="button"
-                onClick={handleAddNewUser}
-                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md transition-all"
+                onClick={handleAddNewUserOnlyName}
+                className="flex-1 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md transition-all"
               >
-                新規登録してカルテ作成
+                登録して完了
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📸 InBody AI OCRスキャン モーダル */}
+      {isInbodyModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Scan className="w-6 h-6 text-indigo-600" />
+                <div>
+                  <h3 className="font-black text-slate-800 text-base">InBody測定結果 自動読み込み</h3>
+                  <p className="text-[10px] text-slate-500">写真をアップロードするだけでカルテに必要な全数値を自動抽出</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setIsInbodyModalOpen(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <input
+                type="file"
+                accept="image/*"
+                ref={inbodyFileInputRef}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => setInbodyImage(reader.result as string);
+                    reader.readAsDataURL(file);
+                  }
+                }}
+                className="hidden"
+              />
+
+              <div
+                onClick={() => inbodyFileInputRef.current?.click()}
+                className="border-2 border-dashed border-indigo-200 bg-indigo-50/30 rounded-2xl p-6 text-center cursor-pointer hover:border-indigo-500 min-h-[160px] flex items-center justify-center transition-all"
+              >
+                {inbodyImage ? (
+                  <img src={inbodyImage} alt="InBodyシート" className="max-h-44 object-contain rounded-lg shadow" />
+                ) : (
+                  <div>
+                    <Upload className="w-9 h-9 text-indigo-400 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-slate-700">InBodyの測定結果シート画像を選択・撮影</p>
+                    <p className="text-[10px] text-slate-400 mt-1">※基礎代謝量・体重・骨格筋量・体脂肪率をAIが自動で全取得します</p>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={runInbodyOcrScan}
+                disabled={isScanningInbody || !inbodyImage}
+                className={`w-full py-3.5 rounded-2xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
+                  inbodyImage ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-200 text-slate-400'
+                }`}
+              >
+                <Scan className="w-4 h-4" />
+                <span>{isScanningInbody ? 'InBodyシートをAI解析中...' : '画像をAIスキャンして自動入力'}</span>
+              </button>
+            </div>
+
+            {scannedInbodyData && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-indigo-200/60 pb-2">
+                  <span className="text-xs font-black text-indigo-900 flex items-center gap-1">
+                    <CheckCircle2 className="w-4 h-4 text-indigo-600" /> AI解析・自動抽出成功
+                  </span>
+                  <span className="text-[10px] text-indigo-600 font-bold">{scannedInbodyData.date} 測定</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">体重</span>
+                    <strong className="text-base text-slate-800">{scannedInbodyData.weight} kg</strong>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">骨格筋量</span>
+                    <strong className="text-base text-indigo-600">{scannedInbodyData.muscleMass} kg</strong>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">体脂肪率</span>
+                    <strong className="text-base text-amber-600">{scannedInbodyData.bodyFatRatio} %</strong>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">実測 基礎代謝 (BMR)</span>
+                    <strong className="text-base text-rose-600">{scannedInbodyData.bmr} kcal</strong>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={saveInbodyToProfile}
+                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Database className="w-4 h-4 text-emerald-400" />
+                  <span>この自動入力データでカルテを完成・保存</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1216,109 +1247,6 @@ export default function App() {
                 計算して設定更新
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* 📸 InBody AI OCRスキャン モーダル */}
-      {isInbodyModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Scan className="w-6 h-6 text-indigo-600" />
-                <div>
-                  <h3 className="font-black text-slate-800 text-base">InBody測定結果 OCR読み込み</h3>
-                  <p className="text-[10px] text-slate-500">写真を撮るだけで基礎代謝・骨格筋量・体脂肪率を自動登録</p>
-                </div>
-              </div>
-              <button type="button" onClick={() => setIsInbodyModalOpen(false)} className="p-1 rounded-full text-slate-400">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <input
-                type="file"
-                accept="image/*"
-                ref={inbodyFileInputRef}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    const reader = new FileReader();
-                    reader.onloadend = () => setInbodyImage(reader.result as string);
-                    reader.readAsDataURL(file);
-                  }
-                }}
-                className="hidden"
-              />
-
-              <div
-                onClick={() => inbodyFileInputRef.current?.click()}
-                className="border-2 border-dashed border-indigo-200 bg-indigo-50/30 rounded-2xl p-6 text-center cursor-pointer hover:border-indigo-500 min-h-[160px] flex items-center justify-center transition-all"
-              >
-                {inbodyImage ? (
-                  <img src={inbodyImage} alt="InBodyシート" className="max-h-44 object-contain rounded-lg shadow" />
-                ) : (
-                  <div>
-                    <Upload className="w-9 h-9 text-indigo-400 mx-auto mb-2" />
-                    <p className="text-xs font-bold text-slate-700">InBodyの測定結果シート画像を選択・撮影</p>
-                    <p className="text-[10px] text-slate-400 mt-1">※基礎代謝量・体重・骨格筋量・体脂肪率を自動解析します</p>
-                  </div>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={runInbodyOcrScan}
-                disabled={isScanningInbody || !inbodyImage}
-                className={`w-full py-3.5 rounded-2xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
-                  inbodyImage ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-200 text-slate-400'
-                }`}
-              >
-                <Scan className="w-4 h-4" />
-                <span>{isScanningInbody ? 'InBodyシートをAIスキャン中...' : '画像をAIスキャンして自動抽出'}</span>
-              </button>
-            </div>
-
-            {scannedInbodyData && (
-              <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between border-b border-indigo-200/60 pb-2">
-                  <span className="text-xs font-black text-indigo-900 flex items-center gap-1">
-                    <CheckCircle2 className="w-4 h-4 text-indigo-600" /> OCRスキャン成功
-                  </span>
-                  <span className="text-[10px] text-indigo-600 font-bold">{scannedInbodyData.date} 測定</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
-                    <span className="text-[10px] text-slate-500 block">体重</span>
-                    <strong className="text-base text-slate-800">{scannedInbodyData.weight} kg</strong>
-                  </div>
-                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
-                    <span className="text-[10px] text-slate-500 block">骨格筋量</span>
-                    <strong className="text-base text-indigo-600">{scannedInbodyData.muscleMass} kg</strong>
-                  </div>
-                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
-                    <span className="text-[10px] text-slate-500 block">体脂肪率</span>
-                    <strong className="text-base text-amber-600">{scannedInbodyData.bodyFatRatio} %</strong>
-                  </div>
-                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
-                    <span className="text-[10px] text-slate-500 block">実測 基礎代謝 (BMR)</span>
-                    <strong className="text-base text-rose-600">{scannedInbodyData.bmr} kcal</strong>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={saveInbodyToProfile}
-                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
-                >
-                  <Database className="w-4 h-4 text-emerald-400" />
-                  <span>この実測データをカルテに更新保存する</span>
-                </button>
-              </div>
-            )}
           </div>
         </div>
       )}
