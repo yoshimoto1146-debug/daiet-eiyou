@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import * as XLSX from 'xlsx'; // Excelバイナリ解析用ライブラリ
+import * as XLSX from 'xlsx';
 import {
   CheckCircle2,
   Flame,
@@ -208,7 +208,7 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // 🧬 Excelのセルデータを直接1行ずつ読み込んで本格分析する関数
+  // 🧬 Excelセルデータの優先分類解析ロジック
   const runGeneExcelScan = async () => {
     if (!geneExcelFile) return alert('遺伝子検査のExcelファイル（.xlsx/.xls）を選択してください');
     setIsParsingExcel(true);
@@ -228,10 +228,10 @@ export default function App() {
       let leucineLow = false;
       let exerciseEffectLow = false;
 
-      let lipidScore = 0;
-      let carbScore = 0;
+      let carbRiskScore = 0;
+      let lipidRiskScore = 0;
+      let proteinRiskScore = 0;
 
-      // Excelの全行をループして項目名と判定・スコアをチェック
       rows.forEach((row) => {
         const itemName = String(row['項目名'] || row['項目'] || '');
         const judge = String(row['判定'] || '');
@@ -240,43 +240,52 @@ export default function App() {
         if (itemName) {
           foundGeneCount++;
 
-          if (itemName.includes('葉酸') && (judge.includes('低') || score < 40)) folicAcidLow = true;
-          if (itemName.includes('ビタミンC') && (judge.includes('低') || score < 40)) vitaminCLow = true;
-          if (itemName.includes('鉄') && (judge.includes('低') || score < 40)) ironLow = true;
-          if (itemName.includes('亜鉛') && (judge.includes('低') || score < 40)) zincLow = true;
-          if (itemName.includes('ロイシン') && (judge.includes('低') || score < 40)) leucineLow = true;
-          if (itemName.includes('運動による減量効果') && (judge.includes('低') || score < 40)) exerciseEffectLow = true;
+          // 微量栄養素フラグ
+          if (itemName.includes('葉酸') && (judge.includes('低') || score <= 35)) folicAcidLow = true;
+          if (itemName.includes('ビタミンC') && (judge.includes('低') || score <= 35)) vitaminCLow = true;
+          if (itemName.includes('鉄') && (judge.includes('低') || score <= 35)) ironLow = true;
+          if (itemName.includes('亜鉛') && (judge.includes('低') || score <= 35)) zincLow = true;
+          if (itemName.includes('ロイシン') && (judge.includes('低') || score <= 35)) leucineLow = true;
+          if (itemName.includes('運動による減量効果') && (judge.includes('低') || score <= 35)) exerciseEffectLow = true;
 
-          if (itemName.includes('脂質') || itemName.includes('皮下脂肪')) lipidScore += score;
-          if (itemName.includes('糖質') || itemName.includes('内臓脂肪') || itemName.includes('血糖')) carbScore += score;
+          // 糖質リスク判定用スコア積算
+          if (itemName.includes('炭水化物') && (judge.includes('少') || score <= 30)) carbRiskScore += 2;
+          if (itemName.includes('糖尿病') && (judge.includes('大') || judge.includes('中'))) carbRiskScore += 3;
+
+          // 脂質リスク判定用スコア積算
+          if (itemName.includes('脂質') && (judge.includes('多') || judge.includes('中') || score >= 60)) lipidRiskScore += 2;
+          if (itemName.includes('脂質異常症') && (judge.includes('大') || judge.includes('中'))) lipidRiskScore += 3;
+
+          // タンパク・筋肉リスク判定用スコア積算
+          if (itemName.includes('筋肉の発達') && (judge.includes('低') || judge.includes('中') || score <= 50)) proteinRiskScore += 2;
+          if (leucineLow) proteinRiskScore += 2;
         }
       });
 
       setIsParsingExcel(false);
 
-      // 無関係なExcel（遺伝子項目が検知されないファイル）の判定ガード
       if (foundGeneCount === 0) {
         alert('⚠️ 選択されたExcelファイル内に「遺伝子検査項目」が見つかりませんでした。chatGENE等の結果データをご選択ください。');
         setParsedGeneProfile(null);
         return;
       }
 
-      // 解析結果に基づく主要タイプの決定
-      let detectedType: GeneType = 'micronutrient';
-      let typeName = '微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ';
+      // 🎯 メインタイプの優先順位決定ロジック
+      let detectedType: GeneType = 'lipid_risk';
+      let typeName = '脂質吸収過多・皮下脂肪タイプ (F18%制限)';
 
-      if (folicAcidLow || ironLow || vitaminCLow) {
-        detectedType = 'micronutrient';
-        typeName = '微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ';
-      } else if (leucineLow) {
-        detectedType = 'protein_risk';
-        typeName = '蛋白分解・筋肉分解リスクタイプ (P35%強化)';
-      } else if (carbScore > lipidScore) {
+      if (carbRiskScore > lipidRiskScore && carbRiskScore >= proteinRiskScore) {
         detectedType = 'carb_risk';
         typeName = '糖質内臓脂肪・インスリンリスクタイプ (C40%制限)';
-      } else {
+      } else if (lipidRiskScore >= carbRiskScore && lipidRiskScore >= proteinRiskScore) {
         detectedType = 'lipid_risk';
         typeName = '脂質吸収過多・皮下脂肪タイプ (F18%制限)';
+      } else if (proteinRiskScore > carbRiskScore && proteinRiskScore > lipidRiskScore) {
+        detectedType = 'protein_risk';
+        typeName = '蛋白分解・筋肉分解リスクタイプ (P35%強化)';
+      } else {
+        detectedType = 'micronutrient';
+        typeName = '微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ';
       }
 
       const profile: GeneProfile = {
@@ -291,7 +300,7 @@ export default function App() {
       };
 
       setParsedGeneProfile(profile);
-      showToast(`Excel全${foundGeneCount}項目を解析！【${typeName}】と判定されました。`);
+      showToast(`Excel全${foundGeneCount}項目を解析！【${typeName}】と自動判定されました。`);
     } catch (err) {
       setIsParsingExcel(false);
       alert('Excelファイルの読み込み中にエラーが発生しました。ファイル形式をご確認ください。');
@@ -315,6 +324,14 @@ export default function App() {
       currentUser.isInbodyMeasured ? currentUser.bmr : undefined
     );
 
+    // 栄養素に応じたLINE文章の自動挿入
+    let subNutrientAdvice = '';
+    if (parsedGeneProfile.folicAcidLow || parsedGeneProfile.ironLow) {
+      subNutrientAdvice = '※遺伝子解析（chatGENE）に基づき、代謝と造血に必要な「鉄分・葉酸」を意識して緑黄色野菜や海藻を積極的に摂ってくださいね。';
+    } else if (parsedGeneProfile.vitaminCLow) {
+      subNutrientAdvice = '※ビタミンC吸収濃度が低めの体質ですので、ブロッコリーやキウイ等を添えるとコラーゲン合成力が高まります。';
+    }
+
     setUsers((prev) => ({
       ...prev,
       [selectedUserId]: {
@@ -325,7 +342,7 @@ export default function App() {
         targetP: calculated.targetP,
         targetF: calculated.targetF,
         targetC: calculated.targetC,
-        adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${currentUser.name}様、遺伝子検査（chatGENE）Excel解析が完了しました！\n「${parsedGeneProfile.typeName}」の体質に合わせ、目標PFC（P:${calculated.targetP}g / F:${calculated.targetF}g / C:${calculated.targetC}g）を自動更新保存いたしました。`,
+        adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${currentUser.name}様、遺伝子検査（chatGENE）Excel解析が完了しました！\n「${parsedGeneProfile.typeName}」の体質に合わせ、目標PFC（P:${calculated.targetP}g / F:${calculated.targetF}g / C:${calculated.targetC}g）を自動最適化保存いたしました。\n${subNutrientAdvice}`,
       },
     }));
 
