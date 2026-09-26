@@ -26,10 +26,18 @@ import {
   Copy,
   Scan,
   Database,
-  History,
+  UserPlus,
+  Dna,
 } from 'lucide-react';
 
 type MealCategory = '朝食' | '昼食' | '夕食' | '間食';
+
+type GeneType = 
+  | 'carb_risk'       // ① 糖質代謝リスクタイプ
+  | 'lipid_risk'      // ② 脂質代謝リスクタイプ
+  | 'protein_risk'    // ③ 蛋白分解・筋肉分解リスクタイプ
+  | 'micronutrient'   // ④ 微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ
+  | 'exercise_resistant'; // ⑤ 運動減量抵抗性タイプ
 
 interface MealItem {
   id: string;
@@ -50,6 +58,17 @@ interface InBodyRecord {
   bmr: number;
 }
 
+interface GeneProfile {
+  type: GeneType;
+  typeName: string;
+  folicAcidLow: boolean;
+  vitaminCLow: boolean;
+  ironLow: boolean;
+  zincLow: boolean;
+  leucineLow: boolean;
+  exerciseEffectLow: boolean;
+}
+
 interface UserProfile {
   id: string;
   name: string;
@@ -57,15 +76,14 @@ interface UserProfile {
   gender: 'female' | 'male';
   height: number;
   weight: number;
-  muscleMass: number; // 骨格筋量 (kg)
-  bodyFatRatio: number; // 体脂肪率 (%)
+  muscleMass: number;
+  bodyFatRatio: number;
   targetWeight: number;
   targetMonths: number;
   pal: number;
-  metabolismType: 'lipid' | 'carb' | 'muscle';
-  metabolismTypeName: string;
-  bmr: number; // 基礎代謝量 (InBody優先)
-  isInbodyMeasured: boolean; // InBody実測値かどうかのフラグ
+  geneProfile: GeneProfile;
+  bmr: number;
+  isInbodyMeasured: boolean;
   tdee: number;
   targetCalories: number;
   targetP: number;
@@ -76,7 +94,7 @@ interface UserProfile {
   adviceMessage: string;
 }
 
-// ハリス・ベネディクト改訂式またはInBody実測BMRに基づくロジカル目標設定
+// 遺伝子タイプごとのPFC比率 & ハリス・ベネディクト個別計算
 const calculateLogicalTargetsWithHB = (
   gender: 'female' | 'male',
   age: number,
@@ -87,10 +105,9 @@ const calculateLogicalTargetsWithHB = (
   targetWeight: number,
   targetMonths: number,
   pal: number,
-  metabolismType: 'lipid' | 'carb' | 'muscle',
+  geneProfile: GeneProfile,
   inbodyBmr?: number
 ) => {
-  // 1. 基礎代謝量（InBody実測値がある場合はそれを優先、なければハリス・ベネディクト式）
   let bmr = 0;
   let isInbody = false;
 
@@ -111,22 +128,27 @@ const calculateLogicalTargetsWithHB = (
 
   let targetCalories = Math.round(tdee - dailyDeficit);
   if (targetCalories < bmr) {
-    targetCalories = bmr; // BMR最低保障ガード
+    targetCalories = bmr;
   }
 
   let pRatio = 0.25, fRatio = 0.25, cRatio = 0.5;
-  if (metabolismType === 'lipid') {
-    pRatio = 0.3; fRatio = 0.18; cRatio = 0.52;
-  } else if (metabolismType === 'carb') {
-    pRatio = 0.3; fRatio = 0.3; cRatio = 0.4;
-  } else {
-    pRatio = 0.35; fRatio = 0.25; cRatio = 0.4;
-  }
 
-  // 筋肉量が多い場合（体脂肪率低め）はタンパク質比率を少し引き上げ
-  if (muscleMass > 0 && bodyFatRatio > 0 && bodyFatRatio < 22) {
-    pRatio += 0.03;
-    fRatio -= 0.03;
+  switch (geneProfile.type) {
+    case 'lipid_risk':
+      pRatio = 0.30; fRatio = 0.18; cRatio = 0.52;
+      break;
+    case 'carb_risk':
+      pRatio = 0.30; fRatio = 0.30; cRatio = 0.40;
+      break;
+    case 'protein_risk':
+      pRatio = 0.35; fRatio = 0.22; cRatio = 0.43;
+      break;
+    case 'micronutrient':
+      pRatio = 0.28; fRatio = 0.22; cRatio = 0.50;
+      break;
+    case 'exercise_resistant':
+      pRatio = 0.32; fRatio = 0.23; cRatio = 0.45;
+      break;
   }
 
   const targetP = Math.round((targetCalories * pRatio) / 4);
@@ -136,11 +158,8 @@ const calculateLogicalTargetsWithHB = (
   return { targetCalories, targetP, targetF, targetC, bmr, tdee, isInbody };
 };
 
-// PFC全適正化判定 連動型 LINEアドバイス作成ロジック
-const generateLineAdvice = (
-  user: UserProfile,
-  newMeal: MealItem
-): string => {
+// PFC全適正化 ＋ 遺伝子特性補強 連動型 LINEアドバイス作成
+const generateLineAdvice = (user: UserProfile, newMeal: MealItem): string => {
   const futureTotalCal = user.todayMeals.reduce((acc, m) => acc + m.calories, 0) + newMeal.calories;
   const futureTotalP = user.todayMeals.reduce((acc, m) => acc + m.p, 0) + newMeal.p;
   const futureTotalF = user.todayMeals.reduce((acc, m) => acc + m.f, 0) + newMeal.f;
@@ -150,141 +169,37 @@ const generateLineAdvice = (
   const fRatio = futureTotalF / user.targetF;
   const cRatio = futureTotalC / user.targetC;
 
-  const isPPerfect = pRatio >= 0.85 && pRatio <= 1.15;
-  const isFPerfect = fRatio >= 0.70 && fRatio <= 1.10;
-  const isCPerfect = cRatio >= 0.70 && cRatio <= 1.10;
+  const isPFCAllPerfect = (pRatio >= 0.85 && pRatio <= 1.15) && (fRatio >= 0.70 && fRatio <= 1.10) && (cRatio >= 0.70 && cRatio <= 1.10);
+  const gene = user.geneProfile;
 
-  const isPFCAllPerfect = isPPerfect && isFPerfect && isCPerfect;
-  const bmrSourceTag = user.isInbodyMeasured ? '（InBody実測基準）' : '（推定基準）';
+  let geneNutrientAdvice = '';
+  if (gene.folicAcidLow || gene.ironLow) {
+    geneNutrientAdvice = '※遺伝子解析（chatGENE）に基づき、赤血球・代謝に必要な「鉄分・葉酸」を意識して緑黄色野菜や海藻を添えてくださいね。';
+  } else if (gene.leucineLow) {
+    geneNutrientAdvice = '※筋肉維持遺伝子の補強のため、BCAA（ロイシン）を含む鶏胸肉・卵・プロテインを継続補給しましょう。';
+  } else if (gene.vitaminCLow) {
+    geneNutrientAdvice = '※ビタミンC吸収濃度が低めの体質ですので、食後にブロッコリーやキウイ等を添えるとコラーゲン合成力が高まります。';
+  }
 
   if (futureTotalCal > user.targetCalories + 150) {
     const calOver = futureTotalCal - user.targetCalories;
-    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、ご投稿ありがとうございます！しっかり記録してくださり素晴らしいです！\n\n本日の合計は【${futureTotalCal} kcal】となり、目標より【+${calOver} kcal】高めのペースとなっております。\nですが、1日で脂肪が増えるわけではありませんのでご安心ください！脂肪定着までに約48時間のタイムラグがあります。\n\n明日はお水や白湯をしっかり摂り、脂質（F）と炭水化物（C）を控えめにしたクリーンな和食でリセットしていきましょう！`;
+    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、ご投稿ありがとうございます！しっかり記録してくださり素晴らしいです！\n\n本日の合計は【${futureTotalCal} kcal】となり、目標より【+${calOver} kcal】高めとなっております。\n脂肪定着までに約48時間のタイムラグがありますのでご安心ください！\n\n明日はお水や白湯を意識して摂り、脂質（F）と炭水化物（C）を少し控えめにした和食でリセットしていきましょう！\n${geneNutrientAdvice}`;
   }
 
   if (futureTotalCal < user.bmr) {
-    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お忙しい中記録してくださり感謝いたします！\n\n1点大切なアドバイスです。本日の合計が【${futureTotalCal} kcal】となっており、${user.name}様の基礎代謝量${bmrSourceTag}【${user.bmr} kcal】を下回っています。\n食べなさすぎると体が「省エネモード（停滞期）」に入り、脂肪が燃えにくくなってしまいます。\n\n今夜または明日の朝、ゆで卵やプロテイン、ギリシャヨーグルトなどを少し足して、基礎代謝分はしっかり補給してあげてくださいね！`;
+    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お忙しい中記録してくださり感謝いたします！\n\n1点大切なアドバイスです。本日の合計が【${futureTotalCal} kcal】となっており、${user.name}様の基礎代謝量【${user.bmr} kcal】を下回っています。\n食べなさすぎると体が「省エネモード（停滞期）」に入り、脂肪が燃えにくくなってしまいます。\n\n今夜または明日の朝、ゆで卵やプロテインなどを少し足して補給してあげてくださいね！`;
   }
 
   if (isPFCAllPerfect) {
-    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お食事の投稿ありがとうございます！素晴らしい成果です！\n\n本日のPFCバランスは完璧です！\n・P（タンパク質）: ${futureTotalP}g（目標: ${user.targetP}g）\n・F（脂質）: ${futureTotalF}g（目標: ${user.targetF}g）\n・C（炭水化物）: ${futureTotalC}g（目標: ${user.targetC}g）\n\n基礎代謝${bmrSourceTag}【${user.bmr} kcal】を安全にクリアしながら、体脂肪だけを効率よく燃焼できる状態が作れています。明日もこの調子でいきましょう！`;
+    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お食事の投稿ありがとうございます！素晴らしい成果です！\n\n【遺伝子最適化（${gene.typeName}）PFCバランス達成】\n・P（タンパク質）: ${futureTotalP}g（目標: ${user.targetP}g）\n・F（脂質）: ${futureTotalF}g（目標: ${user.targetF}g）\n・C（炭水化物）: ${futureTotalC}g（目標: ${user.targetC}g）\n\n基礎代謝【${user.bmr} kcal】をクリアしつつ、体脂肪だけを狙い撃ちで燃焼できる完璧な状態です！明日もこの調子でいきましょう！\n${geneNutrientAdvice}`;
   }
 
   if (pRatio < 0.85) {
     const pGap = Math.round(user.targetP - futureTotalP);
-    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、本日も記録ありがとうございます！カロリーコントロールは非常に良好です！\n\nPFCバランスの精度をさらに上げるポイントとして、本日はタンパク質（P）があと【約${pGap}g】不足気味です。\n（本日: P ${futureTotalP}g / 目標: ${user.targetP}g）\n\n骨盤矯正やEMSでのボディメイク効果を高めるため、明日は朝食に卵を足したりプロテインを取り入れてみてくださいね！`;
+    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、本日も記録ありがとうございます！カロリーコントロールは非常に良好です！\n\nあと一歩向上させるポイントとして、本日はタンパク質（P）があと【約${pGap}g】不足気味です。（本日: P ${futureTotalP}g / 目標: ${user.targetP}g）\n明日は朝食に卵を足したりプロテインを取り入れてみてくださいね！\n${geneNutrientAdvice}`;
   }
 
-  return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お写真の投稿ありがとうございます！\n\n本日の合計は【${futureTotalCal} kcal】（目標: ${user.targetCalories} kcal）と、基礎代謝${bmrSourceTag}【${user.bmr} kcal】をクリアした適正範囲内で推移しています。\n（P: ${futureTotalP}g / F: ${futureTotalF}g / C: ${futureTotalC}g）\n\nこの調子で水分補給も忘れずに取り組んでいきましょう！`;
-};
-
-// 推奨フルコース献立自動生成
-const generateRecommendedMenu = (user: UserProfile): MealItem[] => {
-  const { targetCalories, metabolismType } = user;
-  const breakfastCal = Math.round(targetCalories * 0.3);
-  const lunchCal = Math.round(targetCalories * 0.4);
-  const dinnerCal = Math.round(targetCalories * 0.3);
-
-  if (metabolismType === 'lipid') {
-    return [
-      {
-        id: `rec-b-${Date.now()}`,
-        category: '朝食',
-        name: '【高タンパク和朝食】鮭の塩焼き・玄米ご飯・なめこ味噌汁・ノンオイルツナ和え',
-        calories: breakfastCal,
-        p: Math.round((breakfastCal * 0.3) / 4),
-        f: Math.round((breakfastCal * 0.18) / 9),
-        c: Math.round((breakfastCal * 0.52) / 4),
-        recipe: '①鮭はクッキングシートを敷いたフライパンで油を使わずに焼く。②ツナ水煮缶の水気を切り、ポン酢と小ネギで和える。③温かい玄米ご飯（中盛）となめこの味噌汁を添える。',
-      },
-      {
-        id: `rec-l-${Date.now()}`,
-        category: '昼食',
-        name: '【低脂質クリーンランチ】蒸し鶏胸肉の彩りボウル・もち麦ご飯',
-        calories: lunchCal,
-        p: Math.round((lunchCal * 0.32) / 4),
-        f: Math.round((lunchCal * 0.16) / 9),
-        c: Math.round((lunchCal * 0.52) / 4),
-        recipe: '①鶏胸肉（皮なし）に酒を振りレンジで3分加熱。②もち麦ご飯の上にレタス・ブロッコリー・蒸し鶏をのせる。③ノンオイル和風ドレッシングをかける。',
-      },
-      {
-        id: `rec-d-${Date.now()}`,
-        category: '夕食',
-        name: '【夜の代謝キープ食】タラと大根の和風寄せ鍋・小海老の酢の物',
-        calories: dinnerCal,
-        p: Math.round((dinnerCal * 0.3) / 4),
-        f: Math.round((dinnerCal * 0.18) / 9),
-        c: Math.round((dinnerCal * 0.52) / 4),
-        recipe: '①和風出汁に大根・豆腐・キノコ・タラを入れて煮込む。②ボイル小海老ときゅうりを三杯酢で和える。③具材を中心にしっかり食べる。',
-      },
-    ];
-  } else if (metabolismType === 'carb') {
-    return [
-      {
-        id: `rec-b-${Date.now()}`,
-        category: '朝食',
-        name: '【低GIエナジー】プロテインオートミールボウル・アーモンド添え',
-        calories: breakfastCal,
-        p: Math.round((breakfastCal * 0.3) / 4),
-        f: Math.round((breakfastCal * 0.28) / 9),
-        c: Math.round((breakfastCal * 0.42) / 4),
-        recipe: '①オートミール(30g)に水100mlを加えレンジで1.5分加熱。②プロテインを混ぜる。③ミックスベリーと素焼きアーモンド5粒をのせる。',
-      },
-      {
-        id: `rec-l-${Date.now()}`,
-        category: '昼食',
-        name: '【血糖値安定ランチ】牛赤身ステーキ（150g）・さつまいも・サラダ',
-        calories: lunchCal,
-        p: Math.round((lunchCal * 0.3) / 4),
-        f: Math.round((lunchCal * 0.3) / 9),
-        c: Math.round((lunchCal * 0.4) / 4),
-        recipe: '①牛モモ赤身肉を極少量のオリーブオイルで焼き、塩コショウで調味。②蒸しさつまいも(100g)を主食代わりに添える。③サラダにはレモン汁をかける。',
-      },
-      {
-        id: `rec-d-${Date.now()}`,
-        category: '夕食',
-        name: '【満足糖質オフ食】サバの生姜煮・枝豆豆腐・十六穀米（少なめ）',
-        calories: dinnerCal,
-        p: Math.round((dinnerCal * 0.3) / 4),
-        f: Math.round((dinnerCal * 0.3) / 9),
-        c: Math.round((dinnerCal * 0.4) / 4),
-        recipe: '①サバを醤油・みりん少々・生姜で煮付ける（ラカント推奨）。②枝豆豆腐を添える。③十六穀米は小盛り(100g)にする。',
-      },
-    ];
-  } else {
-    return [
-      {
-        id: `rec-b-${Date.now()}`,
-        category: '朝食',
-        name: '【筋合成モーニング】目玉焼き2個・全粒粉トースト・ギリシャヨーグルト',
-        calories: breakfastCal,
-        p: Math.round((breakfastCal * 0.32) / 4),
-        f: Math.round((breakfastCal * 0.23) / 9),
-        c: Math.round((breakfastCal * 0.45) / 4),
-        recipe: '①ノンオイルで目玉焼き2個を作る。②全粒粉食パンをトースト。③無糖ギリシャヨーグルトを添える。',
-      },
-      {
-        id: `rec-l-${Date.now()}`,
-        category: '昼食',
-        name: '【マッスルパワーランチ】鶏もも肉（皮なし）の照り焼き定食・豚汁',
-        calories: lunchCal,
-        p: Math.round((lunchCal * 0.35) / 4),
-        f: Math.round((lunchCal * 0.25) / 9),
-        c: Math.round((lunchCal * 0.4) / 4),
-        recipe: '①皮なし鶏もも肉を照り焼きにする。②根菜と豚赤身肉の具だくさん豚汁を作る。③白米は普通盛り(150g)を摂る。',
-      },
-      {
-        id: `rec-d-${Date.now()}`,
-        category: '夕食',
-        name: '【高タンパクディナー】刺身盛り合わせ・納豆・冷奴・野菜スープ',
-        calories: dinnerCal,
-        p: Math.round((dinnerCal * 0.35) / 4),
-        f: Math.round((dinnerCal * 0.25) / 9),
-        c: Math.round((dinnerCal * 0.4) / 4),
-        recipe: '①マグロ赤身中心の刺身を盛る。②冷奴と納豆を用意。③キャベツと玉ねぎのノンオイルスープを添える。',
-      },
-    ];
-  }
+  return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お写真の投稿ありがとうございます！\n\n本日の合計は【${futureTotalCal} kcal】（目標: ${user.targetCalories} kcal）と適正範囲内で推移しています。\n（P: ${futureTotalP}g / F: ${futureTotalF}g / C: ${futureTotalC}g）\n\n${geneNutrientAdvice}`;
 };
 
 const INITIAL_USERS: Record<string, UserProfile> = {
@@ -300,8 +215,16 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetWeight: 52,
     targetMonths: 3,
     pal: 1.45,
-    metabolismType: 'lipid',
-    metabolismTypeName: '脂質代謝低下タイプ',
+    geneProfile: {
+      type: 'lipid_risk',
+      typeName: '脂質吸収過多・皮下脂肪タイプ',
+      folicAcidLow: true,
+      vitaminCLow: true,
+      ironLow: true,
+      zincLow: true,
+      leucineLow: false,
+      exerciseEffectLow: true,
+    },
     bmr: 1260,
     isInbodyMeasured: false,
     tdee: 1827,
@@ -321,10 +244,8 @@ const INITIAL_USERS: Record<string, UserProfile> = {
         recipe: '鮭をノンオイルで焼き、温かい玄米ご飯となめこの味噌汁を添える。',
       },
     ],
-    inbodyHistory: [
-      { date: '2026-08-01', weight: 59.5, muscleMass: 20.1, bodyFatRatio: 29.2, bmr: 1245 },
-    ],
-    adviceMessage: '【サクラ整骨院 栄養フィードバック】\n佐藤佳代様、本日の食事記録ありがとうございます！基礎代謝（1,260 kcal）をしっかり超えつつ安全圏内で推移しています。',
+    inbodyHistory: [{ date: '2026-08-01', weight: 59.5, muscleMass: 20.1, bodyFatRatio: 29.2, bmr: 1245 }],
+    adviceMessage: '【サクラ整骨院 栄養フィードバック】\n佐藤佳代様、本日の食事記録ありがとうございます！遺伝子タイプ（脂質吸収過多）に合わせて脂質を抑えた素晴らしいバランスです。',
   },
   userB: {
     id: 'userB',
@@ -338,8 +259,16 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetWeight: 69,
     targetMonths: 3,
     pal: 1.45,
-    metabolismType: 'carb',
-    metabolismTypeName: '糖質吸収過多タイプ',
+    geneProfile: {
+      type: 'carb_risk',
+      typeName: '糖質内臓脂肪・インスリンリスクタイプ',
+      folicAcidLow: false,
+      vitaminCLow: false,
+      ironLow: false,
+      zincLow: false,
+      leucineLow: true,
+      exerciseEffectLow: false,
+    },
     bmr: 1580,
     isInbodyMeasured: false,
     tdee: 2291,
@@ -349,7 +278,7 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetC: 173,
     todayMeals: [],
     inbodyHistory: [],
-    adviceMessage: '【サクラ整骨院 栄養フィードバック】\n田中健太郎様、基礎代謝1,580 kcalを割り込まないよう、タンパク質を中心に補給を行ってください！',
+    adviceMessage: '【サクラ整骨院 栄養フィードバック】\n田中健太郎様、遺伝子特性（糖質リスク）に基づき低GI・高タンパクな食生活を意識していきましょう！',
   },
 };
 
@@ -358,8 +287,26 @@ export default function App() {
   const [selectedUserId, setSelectedUserId] = useState<string>('userA');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // モーダル表示State
   const [isCalcModalOpen, setIsCalcModalOpen] = useState(false);
   const [calcForm, setCalcForm] = useState<UserProfile>(INITIAL_USERS['userA']);
+
+  // 新規会員追加モーダルState
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  const [newUserForm, setNewUserForm] = useState({
+    name: '',
+    age: 38,
+    gender: 'female' as 'female' | 'male',
+    height: 158,
+    weight: 58,
+    targetWeight: 52,
+    targetMonths: 3,
+    pal: 1.45,
+    geneType: 'lipid_risk' as GeneType,
+  });
+
+  const [isGeneModalOpen, setIsGeneModalOpen] = useState(false);
+  const [geneForm, setGeneForm] = useState<GeneProfile>(INITIAL_USERS['userA'].geneProfile);
 
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'image' | 'text'>('image');
@@ -370,14 +317,10 @@ export default function App() {
   const [analysisResult, setAnalysisResult] = useState<MealItem | null>(null);
   const [generatedAdvice, setGeneratedAdvice] = useState<string>('');
 
-  // InBody OCRモーダルState
   const [isInbodyModalOpen, setIsInbodyModalOpen] = useState(false);
   const [inbodyImage, setInbodyImage] = useState<string | null>(null);
   const [isScanningInbody, setIsScanningInbody] = useState(false);
   const [scannedInbodyData, setScannedInbodyData] = useState<InBodyRecord | null>(null);
-
-  const [isMenuSuggestionModalOpen, setIsMenuSuggestionModalOpen] = useState(false);
-  const [suggestedMenu, setSuggestedMenu] = useState<MealItem[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inbodyFileInputRef = useRef<HTMLInputElement>(null);
@@ -400,23 +343,155 @@ export default function App() {
     showToast(msg);
   };
 
-  const handleUserChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newUserId = e.target.value;
-    setSelectedUserId(newUserId);
-    setCalcForm(users[newUserId]);
-    showToast(`「${users[newUserId].name} 様」に切り替えました`);
+  // 氏名入力による新規会員の追加保存
+  const handleAddNewUser = () => {
+    if (!newUserForm.name.trim()) {
+      return alert('会員様のお名前（氏名）を入力してください');
+    }
+
+    const newId = `user_${Date.now()}`;
+    const defaultGene: GeneProfile = {
+      type: newUserForm.geneType,
+      typeName:
+        newUserForm.geneType === 'lipid_risk' ? '脂質吸収過多・皮下脂肪タイプ' :
+        newUserForm.geneType === 'carb_risk' ? '糖質内臓脂肪・インスリンリスクタイプ' :
+        newUserForm.geneType === 'protein_risk' ? '蛋白分解・筋肉分解リスクタイプ' :
+        newUserForm.geneType === 'micronutrient' ? '微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ' :
+        '運動減量抵抗性タイプ',
+      folicAcidLow: false,
+      vitaminCLow: false,
+      ironLow: false,
+      zincLow: false,
+      leucineLow: false,
+      exerciseEffectLow: false,
+    };
+
+    const calculated = calculateLogicalTargetsWithHB(
+      newUserForm.gender,
+      newUserForm.age,
+      newUserForm.height,
+      newUserForm.weight,
+      0,
+      0,
+      newUserForm.targetWeight,
+      newUserForm.targetMonths,
+      newUserForm.pal,
+      defaultGene
+    );
+
+    const newUserObj: UserProfile = {
+      id: newId,
+      name: newUserForm.name,
+      age: newUserForm.age,
+      gender: newUserForm.gender,
+      height: newUserForm.height,
+      weight: newUserForm.weight,
+      muscleMass: 0,
+      bodyFatRatio: 0,
+      targetWeight: newUserForm.targetWeight,
+      targetMonths: newUserForm.targetMonths,
+      pal: newUserForm.pal,
+      geneProfile: defaultGene,
+      bmr: calculated.bmr,
+      isInbodyMeasured: false,
+      tdee: calculated.tdee,
+      targetCalories: calculated.targetCalories,
+      targetP: calculated.targetP,
+      targetF: calculated.targetF,
+      targetC: calculated.targetC,
+      todayMeals: [],
+      inbodyHistory: [],
+      adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${newUserForm.name}様、本日から個別PFC管理ダイエットスタートです！しっかりサポートいたします。`,
+    };
+
+    setUsers((prev) => ({ ...prev, [newId]: newUserObj }));
+    setSelectedUserId(newId);
+    setNewUserForm({ ...newUserForm, name: '' });
+    setIsAddUserModalOpen(false);
+    showToast(`新会員「${newUserForm.name} 様」を追加登録しました！`);
   };
 
-  // InBody画像OCRスキャン実行
+  const handleSaveGeneProfile = () => {
+    const typeNames: Record<GeneType, string> = {
+      lipid_risk: '脂質吸収過多・皮下脂肪タイプ',
+      carb_risk: '糖質内臓脂肪・インスリンリスクタイプ',
+      protein_risk: '蛋白分解・筋肉分解リスクタイプ',
+      micronutrient: '微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ',
+      exercise_resistant: '運動減量抵抗性タイプ',
+    };
+
+    const updatedGene: GeneProfile = {
+      ...geneForm,
+      typeName: typeNames[geneForm.type],
+    };
+
+    const calculated = calculateLogicalTargetsWithHB(
+      currentUser.gender,
+      currentUser.age,
+      currentUser.height,
+      currentUser.weight,
+      currentUser.muscleMass,
+      currentUser.bodyFatRatio,
+      currentUser.targetWeight,
+      currentUser.targetMonths,
+      currentUser.pal,
+      updatedGene,
+      currentUser.isInbodyMeasured ? currentUser.bmr : undefined
+    );
+
+    setUsers((prev) => ({
+      ...prev,
+      [selectedUserId]: {
+        ...prev[selectedUserId],
+        geneProfile: updatedGene,
+        targetCalories: calculated.targetCalories,
+        targetP: calculated.targetP,
+        targetF: calculated.targetF,
+        targetC: calculated.targetC,
+      },
+    }));
+
+    setIsGeneModalOpen(false);
+    showToast('遺伝子検査データ（chatGENE）に基づく設定を更新しました！');
+  };
+
+  const handleSaveLogicalTargets = () => {
+    const calculated = calculateLogicalTargetsWithHB(
+      calcForm.gender,
+      calcForm.age,
+      calcForm.height,
+      calcForm.weight,
+      calcForm.muscleMass,
+      calcForm.bodyFatRatio,
+      calcForm.targetWeight,
+      calcForm.targetMonths,
+      calcForm.pal,
+      calcForm.geneProfile,
+      calcForm.isInbodyMeasured ? calcForm.bmr : undefined
+    );
+
+    setUsers((prev) => ({
+      ...prev,
+      [selectedUserId]: {
+        ...calcForm,
+        bmr: calculated.bmr,
+        tdee: calculated.tdee,
+        targetCalories: calculated.targetCalories,
+        targetP: calculated.targetP,
+        targetF: calculated.targetF,
+        targetC: calculated.targetC,
+      },
+    }));
+
+    setIsCalcModalOpen(false);
+    showToast('目標期間・数値の再計算が完了しました！');
+  };
+
   const runInbodyOcrScan = () => {
     if (!inbodyImage) return alert('InBodyの測定結果シート画像を選択してください');
-
     setIsScanningInbody(true);
-    setScannedInbodyData(null);
-
     setTimeout(() => {
       setIsScanningInbody(false);
-
       const parsed: InBodyRecord = {
         date: new Date().toISOString().split('T')[0],
         weight: currentUser.gender === 'female' ? 57.2 : 75.1,
@@ -424,16 +499,13 @@ export default function App() {
         bodyFatRatio: currentUser.gender === 'female' ? 26.8 : 22.5,
         bmr: currentUser.gender === 'female' ? 1285 : 1620,
       };
-
       setScannedInbodyData(parsed);
-      showToast('InBodyシートの数値スキャン（OCR）が完了しました！');
-    }, 1500);
+      showToast('InBodyシートのAIスキャンが完了しました！');
+    }, 1200);
   };
 
-  // InBodyスキャン結果をカルテに記憶保存
   const saveInbodyToProfile = () => {
     if (!scannedInbodyData) return;
-
     const calculated = calculateLogicalTargetsWithHB(
       currentUser.gender,
       currentUser.age,
@@ -444,7 +516,7 @@ export default function App() {
       currentUser.targetWeight,
       currentUser.targetMonths,
       currentUser.pal,
-      currentUser.metabolismType,
+      currentUser.geneProfile,
       scannedInbodyData.bmr
     );
 
@@ -467,59 +539,7 @@ export default function App() {
     }));
 
     setIsInbodyModalOpen(false);
-    setInbodyImage(null);
-    setScannedInbodyData(null);
-    showToast('InBody測定データをカルテに更新保存しました！');
-  };
-
-  const handleSaveLogicalTargets = () => {
-    const calculated = calculateLogicalTargetsWithHB(
-      calcForm.gender,
-      calcForm.age,
-      calcForm.height,
-      calcForm.weight,
-      calcForm.muscleMass,
-      calcForm.bodyFatRatio,
-      calcForm.targetWeight,
-      calcForm.targetMonths,
-      calcForm.pal,
-      calcForm.metabolismType,
-      calcForm.isInbodyMeasured ? calcForm.bmr : undefined
-    );
-
-    setUsers((prev) => ({
-      ...prev,
-      [selectedUserId]: {
-        ...calcForm,
-        bmr: calculated.bmr,
-        tdee: calculated.tdee,
-        targetCalories: calculated.targetCalories,
-        targetP: calculated.targetP,
-        targetF: calculated.targetF,
-        targetC: calculated.targetC,
-      },
-    }));
-
-    setIsCalcModalOpen(false);
-    showToast('個別計算数値の更新が完了しました！');
-  };
-
-  const handleOpenMenuSuggestion = () => {
-    const menu = generateRecommendedMenu(currentUser);
-    setSuggestedMenu(menu);
-    setIsMenuSuggestionModalOpen(true);
-  };
-
-  const handleApplySuggestedMenu = () => {
-    setUsers((prev) => ({
-      ...prev,
-      [selectedUserId]: {
-        ...prev[selectedUserId],
-        todayMeals: [...suggestedMenu],
-      },
-    }));
-    setIsMenuSuggestionModalOpen(false);
-    showToast('本日の推奨献立（レシピ付き）を一括登録しました！');
+    showToast('InBody測定データを保存しました！');
   };
 
   const runAiAnalysis = () => {
@@ -527,11 +547,8 @@ export default function App() {
     if (activeTab === 'text' && !pastedText.trim()) return alert('文章を入力してください');
 
     setIsAnalyzing(true);
-    setAnalysisResult(null);
-
     setTimeout(() => {
       setIsAnalyzing(false);
-
       const parsedMeal: MealItem = {
         id: `ai-${Date.now()}`,
         category: selectedCategory,
@@ -542,13 +559,9 @@ export default function App() {
         c: 68,
         recipe: '豚ロース薄切り肉を玉ねぎ・生姜醤油で炒める。キャベツの千切りと冷奴を添える。',
       };
-
       setAnalysisResult(parsedMeal);
-
-      const advice = generateLineAdvice(currentUser, parsedMeal);
-      setGeneratedAdvice(advice);
-
-      showToast('AI解析 & PFC全適正化LINEアドバイス作成が完了しました！');
+      setGeneratedAdvice(generateLineAdvice(currentUser, parsedMeal));
+      showToast('AI解析＆LINE文章生成が完了しました！');
     }, 1200);
   };
 
@@ -564,23 +577,6 @@ export default function App() {
     }));
     showToast('食事ログに追加し、アドバイスを更新しました！');
     setIsAiModalOpen(false);
-    setSelectedImage(null);
-    setPastedText('');
-    setAnalysisResult(null);
-    setGeneratedAdvice('');
-  };
-
-  const handleDeleteMeal = (mealId: string) => {
-    if (window.confirm('この食事データを削除してよろしいですか？')) {
-      setUsers((prev) => ({
-        ...prev,
-        [selectedUserId]: {
-          ...prev[selectedUserId],
-          todayMeals: prev[selectedUserId].todayMeals.filter((m) => m.id !== mealId),
-        },
-      }));
-      showToast('データを削除しました');
-    }
   };
 
   const calPercent = Math.min(Math.round((currentCalories / currentUser.targetCalories) * 100), 100);
@@ -606,21 +602,38 @@ export default function App() {
               S
             </div>
             <div>
-              <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 InBody連動PFC管理（スタッフ専用）</h1>
-              <p className="text-[10px] text-slate-500 font-medium">InBody OCR自動スキャン ＋ 個体差最適化</p>
+              <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 遺伝子・InBody統合PFC管理</h1>
+              <p className="text-[10px] text-slate-500 font-medium">chatGENE遺伝子解析 ＋ InBody連動（スタッフ専用）</p>
             </div>
           </div>
 
+          {/* 会員選択 ＆ 新規会員追加エリア */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setIsAddUserModalOpen(true)}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4 text-emerald-100" />
+              <span>＋ 新規会員追加</span>
+            </button>
+
+            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 shadow-sm">
               <User className="w-4 h-4 text-emerald-600 ml-1" />
               <select
                 value={selectedUserId}
-                onChange={handleUserChange}
+                onChange={(e) => {
+                  setSelectedUserId(e.target.value);
+                  setCalcForm(users[e.target.value]);
+                  setGeneForm(users[e.target.value].geneProfile);
+                }}
                 className="bg-transparent text-slate-800 text-xs font-bold py-1 pr-2 outline-none cursor-pointer"
               >
-                <option value="userA">佐藤 佳代 様 (脂質タイプ)</option>
-                <option value="userB">田中 健太郎 様 (糖質タイプ)</option>
+                {Object.values(users).map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} 様 ({u.geneProfile.typeName})
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -633,38 +646,41 @@ export default function App() {
         <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl border border-slate-800 space-y-5">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
             <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-0.5 rounded-full">
-                  {currentUser.metabolismTypeName}
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <span className="text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-0.5 rounded-full flex items-center gap-1">
+                  <Dna className="w-3.5 h-3.5 text-amber-400" /> {currentUser.geneProfile.typeName}
                 </span>
                 {currentUser.isInbodyMeasured && (
                   <span className="text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-3 py-0.5 rounded-full flex items-center gap-1">
-                    <Database className="w-3 h-3 text-indigo-400" /> InBody実測値連動中
+                    <Database className="w-3 h-3 text-indigo-400" /> InBody実測連動
                   </span>
                 )}
                 <span className="text-xs text-slate-400">{currentUser.age}歳 / {currentUser.gender === 'female' ? '女性' : '男性'} / {currentUser.height}cm</span>
               </div>
-              <h2 className="text-2xl font-black text-white">{currentUser.name} 様の個別精度カルテ</h2>
+              <h2 className="text-2xl font-black text-white">{currentUser.name} 様の統合精度カルテ</h2>
             </div>
 
             {/* ボタン群 */}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setIsInbodyModalOpen(true)}
-                className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2"
+                onClick={() => {
+                  setGeneForm(currentUser.geneProfile);
+                  setIsGeneModalOpen(true);
+                }}
+                className="px-3.5 py-2 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 shadow"
               >
-                <Scan className="w-4 h-4 text-indigo-200" />
-                <span>📸 InBodyシート画像読み込み</span>
+                <Dna className="w-4 h-4 text-amber-200" />
+                <span>🧬 遺伝子検査データ設定</span>
               </button>
 
               <button
                 type="button"
-                onClick={handleOpenMenuSuggestion}
-                className="px-4 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-900 font-black text-xs shadow-md transition-all flex items-center gap-2"
+                onClick={() => setIsInbodyModalOpen(true)}
+                className="px-3.5 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 shadow"
               >
-                <ChefHat className="w-4 h-4 text-slate-900" />
-                <span>🎯 迷ったらコレ！本日の推奨献立</span>
+                <Scan className="w-4 h-4 text-indigo-200" />
+                <span>📸 InBody結果読み込み</span>
               </button>
 
               <button
@@ -673,7 +689,7 @@ export default function App() {
                   setCalcForm(currentUser);
                   setIsCalcModalOpen(true);
                 }}
-                className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-all flex items-center gap-2 border border-slate-700"
+                className="px-3.5 py-2 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 border border-slate-700 shadow"
               >
                 <Calculator className="w-4 h-4 text-emerald-400" />
                 <span>数値再計算</span>
@@ -682,7 +698,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsAiModalOpen(true)}
-                className="px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all flex items-center gap-2"
+                className="px-3.5 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 shadow"
               >
                 <Sparkles className="w-4 h-4 text-amber-300" />
                 <span>AI食事解析</span>
@@ -737,9 +753,9 @@ export default function App() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
             <div className="flex items-center gap-2">
               <Activity className="w-5 h-5 text-emerald-600" />
-              <h3 className="font-bold text-slate-800 text-base">本日の摂取カロリー・PFC全適正化進捗状況</h3>
+              <h3 className="font-bold text-slate-800 text-base">本日の摂取カロリー・PFC進捗状況</h3>
             </div>
-            <span className="text-xs text-slate-500 font-medium">※InBody実測骨格筋量・体脂肪率を反映済み</span>
+            <span className="text-xs text-slate-500 font-medium">※遺伝子タイプ（{currentUser.geneProfile.typeName}）最適化基準</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -828,75 +844,14 @@ export default function App() {
           </div>
         </div>
 
-        {/* 本日の食事ログ */}
-        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <div className="flex items-center gap-2">
-              <Utensils className="w-5 h-5 text-emerald-600" />
-              <h3 className="font-bold text-slate-800 text-base">{currentUser.name} 様の本日登録データ</h3>
-            </div>
-            <span className="text-xs text-slate-400 font-bold">{currentUser.todayMeals.length} 件記録</span>
-          </div>
-
-          <div className="space-y-3">
-            {currentUser.todayMeals.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-6">本日の食事ログはまだありません。「🎯 迷ったらコレ！」または「AI食事解析」から登録してください。</p>
-            ) : (
-              currentUser.todayMeals.map((meal) => (
-                <div
-                  key={meal.id}
-                  className="p-4 rounded-2xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-all space-y-2"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-xs font-bold text-emerald-800 bg-emerald-100/80 px-2.5 py-0.5 rounded-lg shrink-0">
-                        {meal.category}
-                      </span>
-                      <span className="text-xs font-black text-slate-800">{meal.name}</span>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-xs font-medium text-slate-600 justify-between sm:justify-end">
-                      <div className="flex items-center gap-3">
-                        <span className="font-black text-slate-800">{meal.calories} kcal</span>
-                        <div className="flex gap-2 text-[11px]">
-                          <span className="text-indigo-600 font-bold">P:{meal.p}g</span>
-                          <span className="text-amber-600 font-bold">F:{meal.f}g</span>
-                          <span className="text-emerald-600 font-bold">C:{meal.c}g</span>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteMeal(meal.id)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {meal.recipe && (
-                    <div className="bg-white p-3 rounded-xl border border-slate-200/80 text-xs text-slate-600 space-y-1">
-                      <span className="font-bold text-emerald-700 flex items-center gap-1 text-[11px]">
-                        <BookOpen className="w-3.5 h-3.5" /> 調理手順・ポイント
-                      </span>
-                      <p className="text-[11px] leading-relaxed text-slate-600">{meal.recipe}</p>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
         {/* 自動生成 LINEアドバイス表示エリア */}
         <div className="p-6 rounded-3xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <MessageSquare className="w-5 h-5" />
-              <h3 className="font-bold text-base">PFC全適正化判定 LINEフィードバック文章</h3>
+              <h3 className="font-bold text-base">遺伝子＆PFC判定 LINEフィードバック文章</h3>
             </div>
-            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">InBody精度連動</span>
+            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">chatGENE最適化</span>
           </div>
           <p className="text-xs text-emerald-50 leading-relaxed bg-black/20 p-4 rounded-2xl border border-white/10 font-sans whitespace-pre-wrap">
             {currentUser.adviceMessage}
@@ -913,6 +868,357 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* 👤 新規会員追加 モーダル */}
+      {isAddUserModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-emerald-600" />
+                <h3 className="font-black text-slate-800 text-base">新規会員様の追加登録</h3>
+              </div>
+              <button type="button" onClick={() => setIsAddUserModalOpen(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                  会員様のお名前（氏名） <span className="text-rose-500">*必須</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="例：山﨑 知子"
+                  value={newUserForm.name}
+                  onChange={(e) => setNewUserForm({ ...newUserForm, name: e.target.value })}
+                  className="w-full p-3 border border-slate-300 rounded-xl text-xs font-bold focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">性別</label>
+                  <select
+                    value={newUserForm.gender}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, gender: e.target.value as 'female' | 'male' })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  >
+                    <option value="female">女性</option>
+                    <option value="male">男性</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">年齢</label>
+                  <input
+                    type="number"
+                    value={newUserForm.age}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, age: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">身長 (cm)</label>
+                  <input
+                    type="number"
+                    value={newUserForm.height}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, height: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">現在体重 (kg)</label>
+                  <input
+                    type="number"
+                    value={newUserForm.weight}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, weight: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">目標体重 (kg)</label>
+                  <input
+                    type="number"
+                    value={newUserForm.targetWeight}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, targetWeight: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">目標期間</label>
+                  <select
+                    value={newUserForm.targetMonths}
+                    onChange={(e) => setNewUserForm({ ...newUserForm, targetMonths: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  >
+                    <option value={1}>1ヶ月</option>
+                    <option value={2}>2ヶ月</option>
+                    <option value={3}>3ヶ月</option>
+                    <option value={4}>4ヶ月</option>
+                    <option value={5}>5ヶ月</option>
+                    <option value={6}>6ヶ月</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsAddUserModalOpen(false)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleAddNewUser}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md transition-all"
+              >
+                新規登録してカルテ作成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🧬 遺伝子検査データ設定 モーダル */}
+      {isGeneModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Dna className="w-5 h-5 text-amber-600" />
+                <div>
+                  <h3 className="font-black text-slate-800 text-base">{currentUser.name} 様 遺伝子検査設定</h3>
+                  <p className="text-[10px] text-slate-500">chatGENEレポート項目に合わせたリスク登録</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setIsGeneModalOpen(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">主たる肥満・代謝遺伝子タイプ</label>
+                <select
+                  value={geneForm.type}
+                  onChange={(e) => setGeneForm({ ...geneForm, type: e.target.value as GeneType })}
+                  className="w-full p-2.5 border border-slate-300 rounded-xl font-bold bg-slate-50"
+                >
+                  <option value="lipid_risk">① 脂質吸収過多・皮下脂肪タイプ (F制限18%)</option>
+                  <option value="carb_risk">② 糖質内臓脂肪・インスリンリスクタイプ (C制限40%)</option>
+                  <option value="protein_risk">③ 蛋白分解・筋肉分解リスクタイプ (P強化35%)</option>
+                  <option value="micronutrient">④ 微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ</option>
+                  <option value="exercise_resistant">⑤ 運動減量抵抗性タイプ (食事9割徹底)</option>
+                </select>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-2xl space-y-2">
+                <span className="font-black text-amber-900 block border-b border-amber-200 pb-1">
+                  chatGENE 栄養素・代謝リスクチェック項目
+                </span>
+
+                <label className="flex items-center gap-2 text-slate-700 font-bold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={geneForm.folicAcidLow}
+                    onChange={(e) => setGeneForm({ ...geneForm, folicAcidLow: e.target.checked })}
+                    className="w-4 h-4 text-amber-600 rounded"
+                  />
+                  <span>葉酸（ビタミンB9）濃度「低」</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-slate-700 font-bold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={geneForm.ironLow}
+                    onChange={(e) => setGeneForm({ ...geneForm, ironLow: e.target.checked })}
+                    className="w-4 h-4 text-amber-600 rounded"
+                  />
+                  <span>鉄分（フェリチン）濃度「低」</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-slate-700 font-bold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={geneForm.vitaminCLow}
+                    onChange={(e) => setGeneForm({ ...geneForm, vitaminCLow: e.target.checked })}
+                    className="w-4 h-4 text-amber-600 rounded"
+                  />
+                  <span>ビタミンC濃度「低」</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-slate-700 font-bold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={geneForm.leucineLow}
+                    onChange={(e) => setGeneForm({ ...geneForm, leucineLow: e.target.checked })}
+                    className="w-4 h-4 text-amber-600 rounded"
+                  />
+                  <span>ロイシン（BCAA）濃度「低」</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-slate-700 font-bold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={geneForm.exerciseEffectLow}
+                    onChange={(e) => setGeneForm({ ...geneForm, exerciseEffectLow: e.target.checked })}
+                    className="w-4 h-4 text-amber-600 rounded"
+                  />
+                  <span>運動による減量効果「低」</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsGeneModalOpen(false)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveGeneProfile}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold shadow-sm"
+              >
+                設定保存＆PFC最適化
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 数値再計算モーダル */}
+      {isCalcModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Calculator className="w-5 h-5 text-emerald-600" />
+                <h3 className="font-black text-slate-800 text-base">個別計算（HB式＋PAL）＆目標設定</h3>
+              </div>
+              <button type="button" onClick={() => setIsCalcModalOpen(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">性別</label>
+                  <select
+                    value={calcForm.gender}
+                    onChange={(e) => setCalcForm({ ...calcForm, gender: e.target.value as 'female' | 'male' })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  >
+                    <option value="female">女性</option>
+                    <option value="male">男性</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">年齢</label>
+                  <input
+                    type="number"
+                    value={calcForm.age}
+                    onChange={(e) => setCalcForm({ ...calcForm, age: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">身長 (cm)</label>
+                  <input
+                    type="number"
+                    value={calcForm.height}
+                    onChange={(e) => setCalcForm({ ...calcForm, height: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">体重 (kg)</label>
+                  <input
+                    type="number"
+                    value={calcForm.weight}
+                    onChange={(e) => setCalcForm({ ...calcForm, weight: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">身体活動 (PAL)</label>
+                  <select
+                    value={calcForm.pal}
+                    onChange={(e) => setCalcForm({ ...calcForm, pal: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  >
+                    <option value={1.2}>低い (1.20)</option>
+                    <option value={1.45}>やや低い/デスクワーク (1.45)</option>
+                    <option value={1.75}>普通/適度な運動 (1.75)</option>
+                    <option value={2.0}>高い/立ち仕事 (2.00)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 bg-emerald-50 p-3 rounded-2xl border border-emerald-100">
+                <div>
+                  <label className="text-[11px] font-bold text-emerald-900 block mb-1">目標体重 (kg)</label>
+                  <input
+                    type="number"
+                    value={calcForm.targetWeight}
+                    onChange={(e) => setCalcForm({ ...calcForm, targetWeight: Number(e.target.value) })}
+                    className="w-full p-2.5 bg-white border border-emerald-200 rounded-xl text-xs font-black text-emerald-700"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-emerald-900 block mb-1">目標期間</label>
+                  <select
+                    value={calcForm.targetMonths}
+                    onChange={(e) => setCalcForm({ ...calcForm, targetMonths: Number(e.target.value) })}
+                    className="w-full p-2.5 bg-white border border-emerald-200 rounded-xl text-xs font-bold text-emerald-700"
+                  >
+                    <option value={1}>1ヶ月</option>
+                    <option value={2}>2ヶ月</option>
+                    <option value={3}>3ヶ月</option>
+                    <option value={4}>4ヶ月</option>
+                    <option value={5}>5ヶ月</option>
+                    <option value={6}>6ヶ月</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsCalcModalOpen(false)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveLogicalTargets}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-sm"
+              >
+                計算して設定更新
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 📸 InBody AI OCRスキャン モーダル */}
       {isInbodyModalOpen && (
@@ -1017,214 +1323,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 🎯 推奨献立モーダル */}
-      {isMenuSuggestionModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <ChefHat className="w-6 h-6 text-amber-500" />
-                <div>
-                  <h3 className="font-black text-slate-800 text-base">{currentUser.name} 様 専用推奨献立</h3>
-                  <p className="text-[10px] text-slate-500">個別目標 ({currentUser.targetCalories} kcal) & 代謝タイプ自動最適化</p>
-                </div>
-              </div>
-              <button type="button" onClick={() => setIsMenuSuggestionModalOpen(false)} className="p-1 rounded-full text-slate-400">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {suggestedMenu.map((item) => (
-                <div key={item.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-md">
-                      {item.category}
-                    </span>
-                    <span className="text-xs font-black text-slate-800">{item.calories} kcal</span>
-                  </div>
-                  <p className="text-xs font-bold text-slate-800 leading-snug">{item.name}</p>
-
-                  <div className="flex gap-3 text-[11px] pt-1 text-slate-500 font-medium border-b border-slate-200/60 pb-2">
-                    <span>P: <strong className="text-indigo-600">{item.p}g</strong></span>
-                    <span>F: <strong className="text-amber-600">{item.f}g</strong></span>
-                    <span>C: <strong className="text-emerald-600">{item.c}g</strong></span>
-                  </div>
-
-                  {item.recipe && (
-                    <div className="pt-1">
-                      <span className="text-[11px] font-bold text-emerald-800 flex items-center gap-1 mb-1">
-                        <BookOpen className="w-3.5 h-3.5" /> 🍳 簡単作り方・ポイント
-                      </span>
-                      <p className="text-[11px] text-slate-600 leading-relaxed bg-white p-2.5 rounded-xl border border-slate-200/80">
-                        {item.recipe}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsMenuSuggestionModalOpen(false)}
-                className="flex-1 py-3 rounded-2xl border border-slate-300 text-xs font-bold text-slate-600"
-              >
-                閉じる
-              </button>
-              <button
-                type="button"
-                onClick={handleApplySuggestedMenu}
-                className="flex-1 py-3 rounded-2xl bg-emerald-600 text-white text-xs font-bold shadow-md flex items-center justify-center gap-1.5"
-              >
-                <CheckSquare className="w-4 h-4 text-emerald-200" />
-                <span>この献立を本日のログに一括登録</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 数値再計算モーダル */}
-      {isCalcModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Calculator className="w-5 h-5 text-emerald-600" />
-                <h3 className="font-black text-slate-800 text-base">個別計算＆目標設定</h3>
-              </div>
-              <button type="button" onClick={() => setIsCalcModalOpen(false)} className="p-1 rounded-full text-slate-400">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">性別</label>
-                  <select
-                    value={calcForm.gender}
-                    onChange={(e) => setCalcForm({ ...calcForm, gender: e.target.value as 'female' | 'male' })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  >
-                    <option value="female">女性</option>
-                    <option value="male">男性</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">年齢</label>
-                  <input
-                    type="number"
-                    value={calcForm.age}
-                    onChange={(e) => setCalcForm({ ...calcForm, age: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">身長 (cm)</label>
-                  <input
-                    type="number"
-                    value={calcForm.height}
-                    onChange={(e) => setCalcForm({ ...calcForm, height: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">体重 (kg)</label>
-                  <input
-                    type="number"
-                    value={calcForm.weight}
-                    onChange={(e) => setCalcForm({ ...calcForm, weight: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">身体活動 (PAL)</label>
-                  <select
-                    value={calcForm.pal}
-                    onChange={(e) => setCalcForm({ ...calcForm, pal: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  >
-                    <option value={1.2}>低い (1.20)</option>
-                    <option value={1.45}>やや低い/デスクワーク (1.45)</option>
-                    <option value={1.75}>普通/適度な運動 (1.75)</option>
-                    <option value={2.0}>高い/立ち仕事 (2.00)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">骨格筋量 (kg)</label>
-                  <input
-                    type="number"
-                    value={calcForm.muscleMass || ''}
-                    onChange={(e) => setCalcForm({ ...calcForm, muscleMass: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">体脂肪率 (%)</label>
-                  <input
-                    type="number"
-                    value={calcForm.bodyFatRatio || ''}
-                    onChange={(e) => setCalcForm({ ...calcForm, bodyFatRatio: Number(e.target.value) })}
-                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 bg-emerald-50 p-3 rounded-2xl border border-emerald-100">
-                <div>
-                  <label className="text-[11px] font-bold text-emerald-900 block mb-1">目標体重 (kg)</label>
-                  <input
-                    type="number"
-                    value={calcForm.targetWeight}
-                    onChange={(e) => setCalcForm({ ...calcForm, targetWeight: Number(e.target.value) })}
-                    className="w-full p-2.5 bg-white border border-emerald-200 rounded-xl text-xs font-black text-emerald-700"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-emerald-900 block mb-1">目標期間</label>
-                  <select
-                    value={calcForm.targetMonths}
-                    onChange={(e) => setCalcForm({ ...calcForm, targetMonths: Number(e.target.value) })}
-                    className="w-full p-2.5 bg-white border border-emerald-200 rounded-xl text-xs font-bold text-emerald-700"
-                  >
-                    <option value={1}>1ヶ月</option>
-                    <option value={2}>2ヶ月</option>
-                    <option value={3}>3ヶ月</option>
-                    <option value={6}>6ヶ月</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsCalcModalOpen(false)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600"
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveLogicalTargets}
-                className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-sm"
-              >
-                計算して設定更新
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* AI解析モーダル */}
       {isAiModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1305,7 +1403,7 @@ export default function App() {
               className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
             >
               <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>{isAnalyzing ? 'AI解析＆PFC全適正化文章作成中...' : '食事を解析してLINEアドバイスを作成'}</span>
+              <span>{isAnalyzing ? 'AI解析＆文章作成中...' : '食事を解析してLINEアドバイスを作成'}</span>
             </button>
 
             {analysisResult && generatedAdvice && (
@@ -1327,7 +1425,7 @@ export default function App() {
                 <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-emerald-900 flex items-center gap-1">
-                      <MessageSquare className="w-4 h-4 text-emerald-600" /> PFC全適正化 自動作成LINE文案
+                      <MessageSquare className="w-4 h-4 text-emerald-600" /> 遺伝子＆PFC最適化 LINE文案
                     </span>
                     <button
                       type="button"
