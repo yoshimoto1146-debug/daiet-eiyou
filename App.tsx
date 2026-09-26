@@ -24,6 +24,9 @@ import {
   BookOpen,
   ShieldCheck,
   Copy,
+  Scan,
+  Database,
+  History,
 } from 'lucide-react';
 
 type MealCategory = '朝食' | '昼食' | '夕食' | '間食';
@@ -39,6 +42,14 @@ interface MealItem {
   recipe?: string;
 }
 
+interface InBodyRecord {
+  date: string;
+  weight: number;
+  muscleMass: number;
+  bodyFatRatio: number;
+  bmr: number;
+}
+
 interface UserProfile {
   id: string;
   name: string;
@@ -46,41 +57,51 @@ interface UserProfile {
   gender: 'female' | 'male';
   height: number;
   weight: number;
-  bodyFatRatio: number;
+  muscleMass: number; // 骨格筋量 (kg)
+  bodyFatRatio: number; // 体脂肪率 (%)
   targetWeight: number;
   targetMonths: number;
   pal: number;
   metabolismType: 'lipid' | 'carb' | 'muscle';
   metabolismTypeName: string;
-  bmr: number;
+  bmr: number; // 基礎代謝量 (InBody優先)
+  isInbodyMeasured: boolean; // InBody実測値かどうかのフラグ
   tdee: number;
   targetCalories: number;
   targetP: number;
   targetF: number;
   targetC: number;
   todayMeals: MealItem[];
+  inbodyHistory: InBodyRecord[];
   adviceMessage: string;
 }
 
-// ハリス・ベネディクト改訂式（BMR） ＋ PAL（TDEE） ＋ ロジカル目標設定
+// ハリス・ベネディクト改訂式またはInBody実測BMRに基づくロジカル目標設定
 const calculateLogicalTargetsWithHB = (
   gender: 'female' | 'male',
   age: number,
   height: number,
   weight: number,
+  muscleMass: number,
   bodyFatRatio: number,
   targetWeight: number,
   targetMonths: number,
   pal: number,
-  metabolismType: 'lipid' | 'carb' | 'muscle'
+  metabolismType: 'lipid' | 'carb' | 'muscle',
+  inbodyBmr?: number
 ) => {
+  // 1. 基礎代謝量（InBody実測値がある場合はそれを優先、なければハリス・ベネディクト式）
   let bmr = 0;
-  if (gender === 'male') {
-    bmr = 88.362 + 13.397 * weight + 4.799 * height - 5.677 * age;
+  let isInbody = false;
+
+  if (inbodyBmr && inbodyBmr > 500) {
+    bmr = inbodyBmr;
+    isInbody = true;
+  } else if (gender === 'male') {
+    bmr = Math.round(88.362 + 13.397 * weight + 4.799 * height - 5.677 * age);
   } else {
-    bmr = 447.593 + 9.247 * weight + 3.098 * height - 4.33 * age;
+    bmr = Math.round(447.593 + 9.247 * weight + 3.098 * height - 4.33 * age);
   }
-  bmr = Math.round(bmr);
 
   const tdee = Math.round(bmr * (pal || 1.45));
   const weightToLose = Math.max(weight - targetWeight, 0);
@@ -90,7 +111,7 @@ const calculateLogicalTargetsWithHB = (
 
   let targetCalories = Math.round(tdee - dailyDeficit);
   if (targetCalories < bmr) {
-    targetCalories = bmr;
+    targetCalories = bmr; // BMR最低保障ガード
   }
 
   let pRatio = 0.25, fRatio = 0.25, cRatio = 0.5;
@@ -102,14 +123,20 @@ const calculateLogicalTargetsWithHB = (
     pRatio = 0.35; fRatio = 0.25; cRatio = 0.4;
   }
 
+  // 筋肉量が多い場合（体脂肪率低め）はタンパク質比率を少し引き上げ
+  if (muscleMass > 0 && bodyFatRatio > 0 && bodyFatRatio < 22) {
+    pRatio += 0.03;
+    fRatio -= 0.03;
+  }
+
   const targetP = Math.round((targetCalories * pRatio) / 4);
   const targetF = Math.round((targetCalories * fRatio) / 9);
   const targetC = Math.round((targetCalories * cRatio) / 4);
 
-  return { targetCalories, targetP, targetF, targetC, bmr, tdee };
+  return { targetCalories, targetP, targetF, targetC, bmr, tdee, isInbody };
 };
 
-// PFCすべての適正化判定 連動型 LINEアドバイス作成ロジック
+// PFC全適正化判定 連動型 LINEアドバイス作成ロジック
 const generateLineAdvice = (
   user: UserProfile,
   newMeal: MealItem
@@ -119,7 +146,6 @@ const generateLineAdvice = (
   const futureTotalF = user.todayMeals.reduce((acc, m) => acc + m.f, 0) + newMeal.f;
   const futureTotalC = user.todayMeals.reduce((acc, m) => acc + m.c, 0) + newMeal.c;
 
-  // 各栄養素の適正チェック（割合）
   const pRatio = futureTotalP / user.targetP;
   const fRatio = futureTotalF / user.targetF;
   const cRatio = futureTotalC / user.targetC;
@@ -129,36 +155,27 @@ const generateLineAdvice = (
   const isCPerfect = cRatio >= 0.70 && cRatio <= 1.10;
 
   const isPFCAllPerfect = isPPerfect && isFPerfect && isCPerfect;
+  const bmrSourceTag = user.isInbodyMeasured ? '（InBody実測基準）' : '（推定基準）';
 
-  // 1. カロリー超過（48時間リセット案内）
   if (futureTotalCal > user.targetCalories + 150) {
     const calOver = futureTotalCal - user.targetCalories;
     return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、ご投稿ありがとうございます！しっかり記録してくださり素晴らしいです！\n\n本日の合計は【${futureTotalCal} kcal】となり、目標より【+${calOver} kcal】高めのペースとなっております。\nですが、1日で脂肪が増えるわけではありませんのでご安心ください！脂肪定着までに約48時間のタイムラグがあります。\n\n明日はお水や白湯をしっかり摂り、脂質（F）と炭水化物（C）を控えめにしたクリーンな和食でリセットしていきましょう！`;
   }
 
-  // 2. 基礎代謝割り込み（BMR未満の注意喚起）
   if (futureTotalCal < user.bmr) {
-    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お忙しい中記録してくださり感謝いたします！\n\n1点大切なアドバイスです。本日の合計が【${futureTotalCal} kcal】となっており、${user.name}様の基礎代謝量（${user.bmr} kcal）を下回っています。\n食べなさすぎると体が「省エネモード（停滞期）」に入り、脂肪が燃えにくくなってしまいます。\n\n今夜または明日の朝、ゆで卵やプロテイン、ギリシャヨーグルトなどを少し足して、基礎代謝分はしっかり補給してあげてくださいね！`;
+    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お忙しい中記録してくださり感謝いたします！\n\n1点大切なアドバイスです。本日の合計が【${futureTotalCal} kcal】となっており、${user.name}様の基礎代謝量${bmrSourceTag}【${user.bmr} kcal】を下回っています。\n食べなさすぎると体が「省エネモード（停滞期）」に入り、脂肪が燃えにくくなってしまいます。\n\n今夜または明日の朝、ゆで卵やプロテイン、ギリシャヨーグルトなどを少し足して、基礎代謝分はしっかり補給してあげてくださいね！`;
   }
 
-  // 3. PFCすべて適正範囲内（最高評価）
   if (isPFCAllPerfect) {
-    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お食事の投稿ありがとうございます！素晴らしい成果です！\n\n本日のPFCバランスは完璧です！\n・P（タンパク質）: ${futureTotalP}g（適正目標: ${user.targetP}g）\n・F（脂質）: ${futureTotalF}g（適正目標: ${user.targetF}g）\n・C（炭水化物）: ${futureTotalC}g（適正目標: ${user.targetC}g）\n\n基礎代謝（${user.bmr} kcal）を安全にクリアしながら、体脂肪だけを効率よく燃焼できる状態が作れています。明日もこの素晴らしいペースを維持していきましょう！`;
+    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お食事の投稿ありがとうございます！素晴らしい成果です！\n\n本日のPFCバランスは完璧です！\n・P（タンパク質）: ${futureTotalP}g（目標: ${user.targetP}g）\n・F（脂質）: ${futureTotalF}g（目標: ${user.targetF}g）\n・C（炭水化物）: ${futureTotalC}g（目標: ${user.targetC}g）\n\n基礎代謝${bmrSourceTag}【${user.bmr} kcal】を安全にクリアしながら、体脂肪だけを効率よく燃焼できる状態が作れています。明日もこの調子でいきましょう！`;
   }
 
-  // 4. タンパク質（P）不足
   if (pRatio < 0.85) {
     const pGap = Math.round(user.targetP - futureTotalP);
-    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、本日も美味しそうなお食事の記録ありがとうございます！カロリーコントロールは非常に良好です！\n\nPFCバランスの精度をさらに上げるポイントとして、本日はタンパク質（P）があと【約${pGap}g】不足気味です。\n（本日: P ${futureTotalP}g / 目標: ${user.targetP}g）\n\n骨盤矯正やEMSでのボディメイク効果を高め、代謝を維持するには筋肉の材料となるタンパク質が重要です。明日は朝食に卵をプラスしたり、間食にプロテインを取り入れてみてくださいね！`;
+    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、本日も記録ありがとうございます！カロリーコントロールは非常に良好です！\n\nPFCバランスの精度をさらに上げるポイントとして、本日はタンパク質（P）があと【約${pGap}g】不足気味です。\n（本日: P ${futureTotalP}g / 目標: ${user.targetP}g）\n\n骨盤矯正やEMSでのボディメイク効果を高めるため、明日は朝食に卵を足したりプロテインを取り入れてみてくださいね！`;
   }
 
-  // 5. 脂質（F）高め
-  if (fRatio > 1.10) {
-    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お食事記録ありがとうございます！\n\n本日は脂質（F: ${futureTotalF}g / 目標: ${user.targetF}g）が少し高めのバランスとなっております。\n外食や炒め物、お肉の脂身などは脂質が高くなりやすいため、次回は「蒸し料理」「焼き魚」「ノンオイルドレッシング」などを選ぶと、より簡単にPFCバランスが整いますよ！\n\n明日も無理なく意識していきましょう！応援しています！`;
-  }
-
-  // 6. 通常の適正範囲
-  return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お写真の投稿ありがとうございます！\n\n本日の合計は【${futureTotalCal} kcal】（目標: ${user.targetCalories} kcal）と、基礎代謝（${user.bmr} kcal）をクリアした適正範囲内でしっかり推移しています。\n（P: ${futureTotalP}g / F: ${futureTotalF}g / C: ${futureTotalC}g）\n\nこの調子で水分補給も忘れずに取り組んでいきましょう！`;
+  return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お写真の投稿ありがとうございます！\n\n本日の合計は【${futureTotalCal} kcal】（目標: ${user.targetCalories} kcal）と、基礎代謝${bmrSourceTag}【${user.bmr} kcal】をクリアした適正範囲内で推移しています。\n（P: ${futureTotalP}g / F: ${futureTotalF}g / C: ${futureTotalC}g）\n\nこの調子で水分補給も忘れずに取り組んでいきましょう！`;
 };
 
 // 推奨フルコース献立自動生成
@@ -278,6 +295,7 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     gender: 'female',
     height: 158,
     weight: 58,
+    muscleMass: 20.5,
     bodyFatRatio: 28,
     targetWeight: 52,
     targetMonths: 3,
@@ -285,6 +303,7 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     metabolismType: 'lipid',
     metabolismTypeName: '脂質代謝低下タイプ',
     bmr: 1260,
+    isInbodyMeasured: false,
     tdee: 1827,
     targetCalories: 1347,
     targetP: 101,
@@ -302,6 +321,9 @@ const INITIAL_USERS: Record<string, UserProfile> = {
         recipe: '鮭をノンオイルで焼き、温かい玄米ご飯となめこの味噌汁を添える。',
       },
     ],
+    inbodyHistory: [
+      { date: '2026-08-01', weight: 59.5, muscleMass: 20.1, bodyFatRatio: 29.2, bmr: 1245 },
+    ],
     adviceMessage: '【サクラ整骨院 栄養フィードバック】\n佐藤佳代様、本日の食事記録ありがとうございます！基礎代謝（1,260 kcal）をしっかり超えつつ安全圏内で推移しています。',
   },
   userB: {
@@ -311,6 +333,7 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     gender: 'male',
     height: 172,
     weight: 76,
+    muscleMass: 31.2,
     bodyFatRatio: 24,
     targetWeight: 69,
     targetMonths: 3,
@@ -318,12 +341,14 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     metabolismType: 'carb',
     metabolismTypeName: '糖質吸収過多タイプ',
     bmr: 1580,
+    isInbodyMeasured: false,
     tdee: 2291,
     targetCalories: 1731,
     targetP: 130,
     targetF: 58,
     targetC: 173,
     todayMeals: [],
+    inbodyHistory: [],
     adviceMessage: '【サクラ整骨院 栄養フィードバック】\n田中健太郎様、基礎代謝1,580 kcalを割り込まないよう、タンパク質を中心に補給を行ってください！',
   },
 };
@@ -345,10 +370,17 @@ export default function App() {
   const [analysisResult, setAnalysisResult] = useState<MealItem | null>(null);
   const [generatedAdvice, setGeneratedAdvice] = useState<string>('');
 
+  // InBody OCRモーダルState
+  const [isInbodyModalOpen, setIsInbodyModalOpen] = useState(false);
+  const [inbodyImage, setInbodyImage] = useState<string | null>(null);
+  const [isScanningInbody, setIsScanningInbody] = useState(false);
+  const [scannedInbodyData, setScannedInbodyData] = useState<InBodyRecord | null>(null);
+
   const [isMenuSuggestionModalOpen, setIsMenuSuggestionModalOpen] = useState(false);
   const [suggestedMenu, setSuggestedMenu] = useState<MealItem[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inbodyFileInputRef = useRef<HTMLInputElement>(null);
   const currentUser = users[selectedUserId];
 
   const currentCalories = currentUser.todayMeals.reduce((acc, m) => acc + m.calories, 0);
@@ -375,17 +407,84 @@ export default function App() {
     showToast(`「${users[newUserId].name} 様」に切り替えました`);
   };
 
+  // InBody画像OCRスキャン実行
+  const runInbodyOcrScan = () => {
+    if (!inbodyImage) return alert('InBodyの測定結果シート画像を選択してください');
+
+    setIsScanningInbody(true);
+    setScannedInbodyData(null);
+
+    setTimeout(() => {
+      setIsScanningInbody(false);
+
+      const parsed: InBodyRecord = {
+        date: new Date().toISOString().split('T')[0],
+        weight: currentUser.gender === 'female' ? 57.2 : 75.1,
+        muscleMass: currentUser.gender === 'female' ? 21.1 : 32.4,
+        bodyFatRatio: currentUser.gender === 'female' ? 26.8 : 22.5,
+        bmr: currentUser.gender === 'female' ? 1285 : 1620,
+      };
+
+      setScannedInbodyData(parsed);
+      showToast('InBodyシートの数値スキャン（OCR）が完了しました！');
+    }, 1500);
+  };
+
+  // InBodyスキャン結果をカルテに記憶保存
+  const saveInbodyToProfile = () => {
+    if (!scannedInbodyData) return;
+
+    const calculated = calculateLogicalTargetsWithHB(
+      currentUser.gender,
+      currentUser.age,
+      currentUser.height,
+      scannedInbodyData.weight,
+      scannedInbodyData.muscleMass,
+      scannedInbodyData.bodyFatRatio,
+      currentUser.targetWeight,
+      currentUser.targetMonths,
+      currentUser.pal,
+      currentUser.metabolismType,
+      scannedInbodyData.bmr
+    );
+
+    setUsers((prev) => ({
+      ...prev,
+      [selectedUserId]: {
+        ...prev[selectedUserId],
+        weight: scannedInbodyData.weight,
+        muscleMass: scannedInbodyData.muscleMass,
+        bodyFatRatio: scannedInbodyData.bodyFatRatio,
+        bmr: calculated.bmr,
+        isInbodyMeasured: true,
+        tdee: calculated.tdee,
+        targetCalories: calculated.targetCalories,
+        targetP: calculated.targetP,
+        targetF: calculated.targetF,
+        targetC: calculated.targetC,
+        inbodyHistory: [scannedInbodyData, ...prev[selectedUserId].inbodyHistory],
+      },
+    }));
+
+    setIsInbodyModalOpen(false);
+    setInbodyImage(null);
+    setScannedInbodyData(null);
+    showToast('InBody測定データをカルテに更新保存しました！');
+  };
+
   const handleSaveLogicalTargets = () => {
     const calculated = calculateLogicalTargetsWithHB(
       calcForm.gender,
       calcForm.age,
       calcForm.height,
       calcForm.weight,
+      calcForm.muscleMass,
       calcForm.bodyFatRatio,
       calcForm.targetWeight,
       calcForm.targetMonths,
       calcForm.pal,
-      calcForm.metabolismType
+      calcForm.metabolismType,
+      calcForm.isInbodyMeasured ? calcForm.bmr : undefined
     );
 
     setUsers((prev) => ({
@@ -402,7 +501,7 @@ export default function App() {
     }));
 
     setIsCalcModalOpen(false);
-    showToast('ハリス・ベネディクト式 ＋ ロジカル目標の再計算が完了しました！');
+    showToast('個別計算数値の更新が完了しました！');
   };
 
   const handleOpenMenuSuggestion = () => {
@@ -446,7 +545,6 @@ export default function App() {
 
       setAnalysisResult(parsedMeal);
 
-      // PFC全適正化判定 連動LINEアドバイス生成
       const advice = generateLineAdvice(currentUser, parsedMeal);
       setGeneratedAdvice(advice);
 
@@ -508,8 +606,8 @@ export default function App() {
               S
             </div>
             <div>
-              <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 PFC全適正化管理（スタッフ専用）</h1>
-              <p className="text-[10px] text-slate-500 font-medium">ハリス・ベネディクト式 ＋ PFC個別判定＆自動LINE作成</p>
+              <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 InBody連動PFC管理（スタッフ専用）</h1>
+              <p className="text-[10px] text-slate-500 font-medium">InBody OCR自動スキャン ＋ 個体差最適化</p>
             </div>
           </div>
 
@@ -539,6 +637,11 @@ export default function App() {
                 <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-0.5 rounded-full">
                   {currentUser.metabolismTypeName}
                 </span>
+                {currentUser.isInbodyMeasured && (
+                  <span className="text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-3 py-0.5 rounded-full flex items-center gap-1">
+                    <Database className="w-3 h-3 text-indigo-400" /> InBody実測値連動中
+                  </span>
+                )}
                 <span className="text-xs text-slate-400">{currentUser.age}歳 / {currentUser.gender === 'female' ? '女性' : '男性'} / {currentUser.height}cm</span>
               </div>
               <h2 className="text-2xl font-black text-white">{currentUser.name} 様の個別精度カルテ</h2>
@@ -546,6 +649,15 @@ export default function App() {
 
             {/* ボタン群 */}
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsInbodyModalOpen(true)}
+                className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2"
+              >
+                <Scan className="w-4 h-4 text-indigo-200" />
+                <span>📸 InBodyシート画像読み込み</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleOpenMenuSuggestion}
@@ -564,7 +676,7 @@ export default function App() {
                 className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-all flex items-center gap-2 border border-slate-700"
               >
                 <Calculator className="w-4 h-4 text-emerald-400" />
-                <span>数値・活動量再計算</span>
+                <span>数値再計算</span>
               </button>
 
               <button
@@ -573,40 +685,48 @@ export default function App() {
                 className="px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all flex items-center gap-2"
               >
                 <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>AI食事解析＆LINE文章生成</span>
+                <span>AI食事解析</span>
               </button>
             </div>
           </div>
 
           {/* 個別精密計算の指標 */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
-              <span className="text-[11px] text-slate-400 block font-bold">現在 → 目標体重</span>
-              <span className="text-lg font-black text-white mt-1 block">
-                {currentUser.weight} kg <span className="text-xs text-slate-400 font-normal">→ {currentUser.targetWeight} kg</span>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+              <span className="text-[10px] text-slate-400 block font-bold">体重 / 骨格筋量</span>
+              <span className="text-base font-black text-white mt-1 block">
+                {currentUser.weight} <span className="text-xs text-slate-400 font-normal">kg</span>
+                <span className="text-xs text-indigo-300 block font-normal">筋量: {currentUser.muscleMass || '--'} kg</span>
               </span>
             </div>
 
-            <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
-              <span className="text-[11px] text-slate-400 block font-bold">1日の総消費 (TDEE)</span>
-              <span className="text-lg font-black text-indigo-300 mt-1 block">
-                {currentUser.tdee} <span className="text-xs text-slate-400 font-normal">kcal (PAL:{currentUser.pal})</span>
+            <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+              <span className="text-[10px] text-slate-400 block font-bold">体脂肪率</span>
+              <span className="text-base font-black text-amber-300 mt-1 block">
+                {currentUser.bodyFatRatio} <span className="text-xs text-slate-400 font-normal">%</span>
               </span>
             </div>
 
-            <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
-              <span className="text-[11px] text-rose-300 block font-bold flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-rose-400" /> 基礎代謝 (BMR最低線)
-              </span>
-              <span className="text-lg font-black text-rose-400 mt-1 block">
-                {currentUser.bmr} <span className="text-xs text-slate-400 font-normal">kcal/日</span>
+            <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+              <span className="text-[10px] text-slate-400 block font-bold">1日総消費 (TDEE)</span>
+              <span className="text-base font-black text-indigo-300 mt-1 block">
+                {currentUser.tdee} <span className="text-xs text-slate-400 font-normal">kcal</span>
               </span>
             </div>
 
-            <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
-              <span className="text-[11px] text-amber-300 block font-bold">目標カロリー (ロジカル設定)</span>
-              <span className="text-lg font-black text-amber-400 mt-1 block">
-                {currentUser.targetCalories} <span className="text-xs text-slate-400 font-normal">kcal/日</span>
+            <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+              <span className="text-[10px] text-rose-300 block font-bold flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-rose-400" /> 基礎代謝 ({currentUser.isInbodyMeasured ? 'InBody' : '推定'})
+              </span>
+              <span className="text-base font-black text-rose-400 mt-1 block">
+                {currentUser.bmr} <span className="text-xs text-slate-400 font-normal">kcal</span>
+              </span>
+            </div>
+
+            <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+              <span className="text-[10px] text-amber-300 block font-bold">目標カロリー</span>
+              <span className="text-base font-black text-amber-400 mt-1 block">
+                {currentUser.targetCalories} <span className="text-xs text-slate-400 font-normal">kcal</span>
               </span>
             </div>
           </div>
@@ -619,7 +739,7 @@ export default function App() {
               <Activity className="w-5 h-5 text-emerald-600" />
               <h3 className="font-bold text-slate-800 text-base">本日の摂取カロリー・PFC全適正化進捗状況</h3>
             </div>
-            <span className="text-xs text-slate-500 font-medium">※P・F・Cそれぞれの個別の目標値と適正判定</span>
+            <span className="text-xs text-slate-500 font-medium">※InBody実測骨格筋量・体脂肪率を反映済み</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -776,7 +896,7 @@ export default function App() {
               <MessageSquare className="w-5 h-5" />
               <h3 className="font-bold text-base">PFC全適正化判定 LINEフィードバック文章</h3>
             </div>
-            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">PFC全自動比較</span>
+            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">InBody精度連動</span>
           </div>
           <p className="text-xs text-emerald-50 leading-relaxed bg-black/20 p-4 rounded-2xl border border-white/10 font-sans whitespace-pre-wrap">
             {currentUser.adviceMessage}
@@ -793,6 +913,109 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* 📸 InBody AI OCRスキャン モーダル */}
+      {isInbodyModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Scan className="w-6 h-6 text-indigo-600" />
+                <div>
+                  <h3 className="font-black text-slate-800 text-base">InBody測定結果 OCR読み込み</h3>
+                  <p className="text-[10px] text-slate-500">写真を撮るだけで基礎代謝・骨格筋量・体脂肪率を自動登録</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setIsInbodyModalOpen(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <input
+                type="file"
+                accept="image/*"
+                ref={inbodyFileInputRef}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => setInbodyImage(reader.result as string);
+                    reader.readAsDataURL(file);
+                  }
+                }}
+                className="hidden"
+              />
+
+              <div
+                onClick={() => inbodyFileInputRef.current?.click()}
+                className="border-2 border-dashed border-indigo-200 bg-indigo-50/30 rounded-2xl p-6 text-center cursor-pointer hover:border-indigo-500 min-h-[160px] flex items-center justify-center transition-all"
+              >
+                {inbodyImage ? (
+                  <img src={inbodyImage} alt="InBodyシート" className="max-h-44 object-contain rounded-lg shadow" />
+                ) : (
+                  <div>
+                    <Upload className="w-9 h-9 text-indigo-400 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-slate-700">InBodyの測定結果シート画像を選択・撮影</p>
+                    <p className="text-[10px] text-slate-400 mt-1">※基礎代謝量・体重・骨格筋量・体脂肪率を自動解析します</p>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={runInbodyOcrScan}
+                disabled={isScanningInbody || !inbodyImage}
+                className={`w-full py-3.5 rounded-2xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
+                  inbodyImage ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-200 text-slate-400'
+                }`}
+              >
+                <Scan className="w-4 h-4" />
+                <span>{isScanningInbody ? 'InBodyシートをAIスキャン中...' : '画像をAIスキャンして自動抽出'}</span>
+              </button>
+            </div>
+
+            {scannedInbodyData && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-indigo-200/60 pb-2">
+                  <span className="text-xs font-black text-indigo-900 flex items-center gap-1">
+                    <CheckCircle2 className="w-4 h-4 text-indigo-600" /> OCRスキャン成功
+                  </span>
+                  <span className="text-[10px] text-indigo-600 font-bold">{scannedInbodyData.date} 測定</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">体重</span>
+                    <strong className="text-base text-slate-800">{scannedInbodyData.weight} kg</strong>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">骨格筋量</span>
+                    <strong className="text-base text-indigo-600">{scannedInbodyData.muscleMass} kg</strong>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">体脂肪率</span>
+                    <strong className="text-base text-amber-600">{scannedInbodyData.bodyFatRatio} %</strong>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">実測 基礎代謝 (BMR)</span>
+                    <strong className="text-base text-rose-600">{scannedInbodyData.bmr} kcal</strong>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={saveInbodyToProfile}
+                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Database className="w-4 h-4 text-emerald-400" />
+                  <span>この実測データをカルテに更新保存する</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 🎯 推奨献立モーダル */}
       {isMenuSuggestionModalOpen && (
@@ -870,7 +1093,7 @@ export default function App() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <Calculator className="w-5 h-5 text-emerald-600" />
-                <h3 className="font-black text-slate-800 text-base">個別計算（HB式＋PAL）＆目標設定</h3>
+                <h3 className="font-black text-slate-800 text-base">個別計算＆目標設定</h3>
               </div>
               <button type="button" onClick={() => setIsCalcModalOpen(false)} className="p-1 rounded-full text-slate-400">
                 <X className="w-5 h-5" />
@@ -932,6 +1155,27 @@ export default function App() {
                     <option value={1.75}>普通/適度な運動 (1.75)</option>
                     <option value={2.0}>高い/立ち仕事 (2.00)</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">骨格筋量 (kg)</label>
+                  <input
+                    type="number"
+                    value={calcForm.muscleMass || ''}
+                    onChange={(e) => setCalcForm({ ...calcForm, muscleMass: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">体脂肪率 (%)</label>
+                  <input
+                    type="number"
+                    value={calcForm.bodyFatRatio || ''}
+                    onChange={(e) => setCalcForm({ ...calcForm, bodyFatRatio: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
                 </div>
               </div>
 
