@@ -322,14 +322,14 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inbodyFileInputRef = useRef<HTMLInputElement>(null);
   const excelFileInputRef = useRef<HTMLInputElement>(null);
-  const currentUser = users[selectedUserId];
+  const currentUser = users[selectedUserId] || Object.values(users)[0];
 
-  const currentCalories = currentUser.todayMeals.reduce((acc, m) => acc + m.calories, 0);
-  const currentP = currentUser.todayMeals.reduce((acc, m) => acc + m.p, 0);
-  const currentF = currentUser.todayMeals.reduce((acc, m) => acc + m.f, 0);
-  const currentC = currentUser.todayMeals.reduce((acc, m) => acc + m.c, 0);
+  const currentCalories = currentUser?.todayMeals.reduce((acc, m) => acc + m.calories, 0) || 0;
+  const currentP = currentUser?.todayMeals.reduce((acc, m) => acc + m.p, 0) || 0;
+  const currentF = currentUser?.todayMeals.reduce((acc, m) => acc + m.f, 0) || 0;
+  const currentC = currentUser?.todayMeals.reduce((acc, m) => acc + m.c, 0) || 0;
 
-  const isBelowBmr = currentCalories < currentUser.bmr;
+  const isBelowBmr = currentCalories < (currentUser?.bmr || 0);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -339,6 +339,25 @@ export default function App() {
   const copyToClipboard = (text: string, msg: string) => {
     navigator.clipboard.writeText(text);
     showToast(msg);
+  };
+
+  // 🗑️ 会員の削除機能
+  const handleDeleteUser = () => {
+    const userList = Object.keys(users);
+    if (userList.length <= 1) {
+      return alert('最後の1名の会員は削除できません。');
+    }
+
+    if (window.confirm(`「${currentUser.name} 様」のカルテ・食事データを削除してもよろしいですか？`)) {
+      const targetName = currentUser.name;
+      const updatedUsers = { ...users };
+      delete updatedUsers[selectedUserId];
+
+      const nextUserId = Object.keys(updatedUsers)[0];
+      setUsers(updatedUsers);
+      setSelectedUserId(nextUserId);
+      showToast(`「${targetName} 様」を削除しました。`);
+    }
   };
 
   // 氏名のみで新規会員登録
@@ -402,7 +421,7 @@ export default function App() {
     setSelectedUserId(newId);
     setNewUserName('');
     setIsAddUserModalOpen(false);
-    showToast(`「${newUserName.trim()} 様」を追加しました！続けてInBodyシートや遺伝子Excelを登録してください。`);
+    showToast(`「${newUserName.trim()} 様」を追加しました！`);
   };
 
   // 🧬 Excel遺伝子検査結果ファイルの自動読み取り解析
@@ -413,7 +432,6 @@ export default function App() {
     setTimeout(() => {
       setIsParsingExcel(false);
 
-      // Excelから自動抽出された遺伝子解析結果（シミュレーション）
       const parsed: GeneProfile = {
         type: 'lipid_risk',
         typeName: '脂質吸収過多・皮下脂肪タイプ (F18%制限)',
@@ -430,7 +448,6 @@ export default function App() {
     }, 1200);
   };
 
-  // 解析された遺伝子情報をカルテに記憶・自動PFC最適化保存
   const saveGeneExcelToProfile = () => {
     if (!parsedGeneProfile) return;
 
@@ -500,7 +517,6 @@ export default function App() {
     showToast('目標期間・数値の再計算が完了しました！');
   };
 
-  // InBody画像OCRスキャン実行
   const runInbodyOcrScan = () => {
     if (!inbodyImage) return alert('InBodyの測定結果シート画像を選択してください');
     setIsScanningInbody(true);
@@ -520,7 +536,6 @@ export default function App() {
     }, 1300);
   };
 
-  // スキャンされたInBody情報をカルテに記憶・自動再計算保存
   const saveInbodyToProfile = () => {
     if (!scannedInbodyData) return;
 
@@ -603,108 +618,118 @@ export default function App() {
     setIsAiModalOpen(false);
   };
 
-  const calPercent = currentUser.targetCalories > 0 ? Math.min(Math.round((currentCalories / currentUser.targetCalories) * 100), 100) : 0;
-  const pPercent = currentUser.targetP > 0 ? Math.min(Math.round((currentP / currentUser.targetP) * 100), 100) : 0;
-  const fPercent = currentUser.targetF > 0 ? Math.min(Math.round((currentF / currentUser.targetF) * 100), 100) : 0;
-  const cPercent = currentUser.targetC > 0 ? Math.min(Math.round((currentC / currentUser.targetC) * 100), 100) : 0;
+  const calPercent = currentUser?.targetCalories > 0 ? Math.min(Math.round((currentCalories / currentUser.targetCalories) * 100), 100) : 0;
+  const pPercent = currentUser?.targetP > 0 ? Math.min(Math.round((currentP / currentUser.targetP) * 100), 100) : 0;
+  const fPercent = currentUser?.targetF > 0 ? Math.min(Math.round((currentF / currentUser.targetF) * 100), 100) : 0;
+  const cPercent = currentUser?.targetC > 0 ? Math.min(Math.round((currentC / currentUser.targetC) * 100), 100) : 0;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col antialiased font-sans">
       {/* トースト */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-xs font-bold border border-slate-700 animate-bounce">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+        <div className="fixed bottom-4 right-4 left-4 sm:left-auto sm:bottom-6 sm:right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-xs font-bold border border-slate-700 animate-bounce">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* ヘッダー */}
+      {/* スマホ完全対応ヘッダー */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-600 flex items-center justify-center text-white font-black text-xl shadow-md">
+        <div className="max-w-6xl mx-auto px-3 py-2.5 sm:px-4 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-emerald-600 flex items-center justify-center text-white font-black text-lg sm:text-xl shadow-md shrink-0">
               S
             </div>
             <div>
-              <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 遺伝子・InBody統合PFC管理</h1>
-              <p className="text-[10px] text-slate-500 font-medium">InBody ＋ 遺伝子検査(Excel) 自動読み込み連動</p>
+              <h1 className="text-sm sm:text-base font-black text-slate-800 leading-tight">サクラ整骨院 統合PFC管理</h1>
+              <p className="text-[10px] text-slate-500 font-medium">InBody ＋ 遺伝子Excel 自動解析</p>
             </div>
           </div>
 
-          {/* 会員選択 ＆ 新規会員追加エリア */}
-          <div className="flex items-center gap-2">
+          {/* 会員選択 ＆ 新規・削除エリア（スマホで横幅フィット） */}
+          <div className="flex items-center gap-1.5 w-full sm:w-auto justify-between">
             <button
               type="button"
               onClick={() => setIsAddUserModalOpen(true)}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl sm:rounded-2xl text-xs font-black flex items-center gap-1 shadow-sm shrink-0 cursor-pointer"
             >
-              <UserPlus className="w-4 h-4 text-emerald-100" />
-              <span>＋ 新規会員追加</span>
+              <UserPlus className="w-3.5 h-3.5 text-emerald-100" />
+              <span>＋ 新規追加</span>
             </button>
 
-            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 shadow-sm">
-              <User className="w-4 h-4 text-emerald-600 ml-1" />
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl sm:rounded-2xl border border-slate-200 flex-1 sm:flex-initial max-w-[210px] sm:max-w-none">
+              <User className="w-3.5 h-3.5 text-emerald-600 ml-1 shrink-0" />
               <select
                 value={selectedUserId}
                 onChange={(e) => {
                   setSelectedUserId(e.target.value);
                   setCalcForm(users[e.target.value]);
                 }}
-                className="bg-transparent text-slate-800 text-xs font-bold py-1 pr-2 outline-none cursor-pointer"
+                className="bg-transparent text-slate-800 text-xs font-bold py-1 pr-1 outline-none cursor-pointer w-full truncate"
               >
                 {Object.values(users).map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.name} 様 ({u.geneProfile.typeName})
+                    {u.name} 様
                   </option>
                 ))}
               </select>
             </div>
+
+            {/* 🗑️ 会員削除ボタン */}
+            <button
+              type="button"
+              onClick={handleDeleteUser}
+              title="選択中の会員を削除"
+              className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl sm:rounded-2xl shrink-0 transition-all cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </header>
 
       {/* メイン */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6 space-y-6">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-3 py-4 sm:px-4 sm:py-6 space-y-4 sm:space-y-6">
         {/* カルテダッシュボード */}
-        <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl border border-slate-800 space-y-5">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+        <div className="bg-slate-900 text-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl border border-slate-800 space-y-4 sm:space-y-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3 sm:pb-4">
             <div>
-              <div className="flex flex-wrap items-center gap-2 mb-1">
-                <span className="text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-0.5 rounded-full flex items-center gap-1">
-                  <Dna className="w-3.5 h-3.5 text-amber-400" /> {currentUser.geneProfile.typeName}
+              <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                <span className="text-[10px] sm:text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                  <Dna className="w-3 h-3 text-amber-400" /> {currentUser?.geneProfile.typeName}
                 </span>
-                {currentUser.isInbodyMeasured && (
-                  <span className="text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-3 py-0.5 rounded-full flex items-center gap-1">
+                {currentUser?.isInbodyMeasured && (
+                  <span className="text-[10px] sm:text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full flex items-center gap-1">
                     <Database className="w-3 h-3 text-indigo-400" /> InBody実測済み
                   </span>
                 )}
-                {currentUser.isGeneMeasured && (
-                  <span className="text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-3 py-0.5 rounded-full flex items-center gap-1">
+                {currentUser?.isGeneMeasured && (
+                  <span className="text-[10px] sm:text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full flex items-center gap-1">
                     <FileSpreadsheet className="w-3 h-3 text-emerald-400" /> 遺伝子Excel適用済み
                   </span>
                 )}
               </div>
-              <h2 className="text-2xl font-black text-white">{currentUser.name} 様の統合精度カルテ</h2>
+              <h2 className="text-xl sm:text-2xl font-black text-white">{currentUser?.name} 様のカルテ</h2>
             </div>
 
-            {/* ボタン群 */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* 操作ボタン群（スマホ画面で2列グリッド配置） */}
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 pt-1 sm:pt-0">
               <button
                 type="button"
                 onClick={() => setIsInbodyModalOpen(true)}
-                className="px-3.5 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 shadow"
+                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 shadow"
               >
-                <Scan className="w-4 h-4 text-indigo-200" />
-                <span>📸 InBody結果読み込み</span>
+                <Scan className="w-3.5 h-3.5 text-indigo-200" />
+                <span>InBody読み込み</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setIsGeneExcelModalOpen(true)}
-                className="px-3.5 py-2 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 shadow"
+                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 shadow"
               >
-                <FileSpreadsheet className="w-4 h-4 text-amber-200" />
-                <span>🧬 遺伝子検査結果 (Excel)</span>
+                <FileSpreadsheet className="w-3.5 h-3.5 text-amber-200" />
+                <span>遺伝子 (Excel)</span>
               </button>
 
               <button
@@ -713,87 +738,86 @@ export default function App() {
                   setCalcForm(currentUser);
                   setIsCalcModalOpen(true);
                 }}
-                className="px-3.5 py-2 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 border border-slate-700 shadow"
+                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 border border-slate-700 shadow"
               >
-                <Calculator className="w-4 h-4 text-emerald-400" />
+                <Calculator className="w-3.5 h-3.5 text-emerald-400" />
                 <span>数値再計算</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setIsAiModalOpen(true)}
-                className="px-3.5 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 shadow"
+                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 shadow"
               >
-                <Sparkles className="w-4 h-4 text-amber-300" />
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                 <span>AI食事解析</span>
               </button>
             </div>
           </div>
 
-          {/* 個別精密計算の指標 */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+          {/* 個別精密計算の指標（スマホ2列/PC5列） */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 sm:gap-3">
+            <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-700">
               <span className="text-[10px] text-slate-400 block font-bold">体重 / 骨格筋量</span>
-              <span className="text-base font-black text-white mt-1 block">
-                {currentUser.weight > 0 ? `${currentUser.weight} kg` : '未登録 (InBody要撮影)'}
-                <span className="text-xs text-indigo-300 block font-normal">筋量: {currentUser.muscleMass ? `${currentUser.muscleMass} kg` : '--'}</span>
+              <span className="text-sm sm:text-base font-black text-white mt-1 block">
+                {currentUser?.weight > 0 ? `${currentUser.weight} kg` : '未登録'}
+                <span className="text-[10px] sm:text-xs text-indigo-300 block font-normal">筋量: {currentUser?.muscleMass ? `${currentUser.muscleMass} kg` : '--'}</span>
               </span>
             </div>
 
-            <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+            <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-700">
               <span className="text-[10px] text-slate-400 block font-bold">体脂肪率</span>
-              <span className="text-base font-black text-amber-300 mt-1 block">
-                {currentUser.bodyFatRatio > 0 ? `${currentUser.bodyFatRatio} %` : '--'}
+              <span className="text-sm sm:text-base font-black text-amber-300 mt-1 block">
+                {currentUser?.bodyFatRatio > 0 ? `${currentUser.bodyFatRatio} %` : '--'}
               </span>
             </div>
 
-            <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+            <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-700">
               <span className="text-[10px] text-slate-400 block font-bold">1日総消費 (TDEE)</span>
-              <span className="text-base font-black text-indigo-300 mt-1 block">
-                {currentUser.tdee} <span className="text-xs text-slate-400 font-normal">kcal</span>
+              <span className="text-sm sm:text-base font-black text-indigo-300 mt-1 block">
+                {currentUser?.tdee} <span className="text-[10px] text-slate-400 font-normal">kcal</span>
               </span>
             </div>
 
-            <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+            <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-700">
               <span className="text-[10px] text-rose-300 block font-bold flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-rose-400" /> 基礎代謝 ({currentUser.isInbodyMeasured ? 'InBody' : '推定'})
+                <ShieldCheck className="w-3 h-3 text-rose-400 shrink-0" /> 基礎代謝 ({currentUser?.isInbodyMeasured ? 'InBody' : '推定'})
               </span>
-              <span className="text-base font-black text-rose-400 mt-1 block">
-                {currentUser.bmr} <span className="text-xs text-slate-400 font-normal">kcal</span>
+              <span className="text-sm sm:text-base font-black text-rose-400 mt-1 block">
+                {currentUser?.bmr} <span className="text-[10px] text-slate-400 font-normal">kcal</span>
               </span>
             </div>
 
-            <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+            <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-700 col-span-2 md:col-span-1">
               <span className="text-[10px] text-amber-300 block font-bold">目標カロリー</span>
-              <span className="text-base font-black text-amber-400 mt-1 block">
-                {currentUser.targetCalories} <span className="text-xs text-slate-400 font-normal">kcal</span>
+              <span className="text-sm sm:text-base font-black text-amber-400 mt-1 block">
+                {currentUser?.targetCalories} <span className="text-[10px] text-slate-400 font-normal">kcal</span>
               </span>
             </div>
           </div>
         </div>
 
-        {/* 摂取状況＆PFC全適正化バランス */}
-        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
+        {/* 摂取状況＆PFC進捗状況 */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm border border-slate-200 space-y-4 sm:space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-1">
             <div className="flex items-center gap-2">
-              <Activity className="w-5 h-5 text-emerald-600" />
-              <h3 className="font-bold text-slate-800 text-base">本日の摂取カロリー・PFC進捗状況</h3>
+              <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base">本日の摂取カロリー・PFC進捗状況</h3>
             </div>
-            <span className="text-xs text-slate-500 font-medium">※InBody実測 ＋ 遺伝子最適化基準</span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-slate-900 text-white p-5 rounded-2xl flex flex-col justify-between shadow-inner">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 sm:gap-4">
+            <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-2xl flex flex-col justify-between shadow-inner">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-400">本日摂取エネルギー</span>
-                <Flame className="w-5 h-5 text-amber-400" />
+                <Flame className="w-4 h-4 text-amber-400" />
               </div>
-              <div className="my-3">
+              <div className="my-2 sm:my-3">
                 <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-black">{currentCalories}</span>
-                  <span className="text-xs text-slate-400">/ {currentUser.targetCalories} kcal</span>
+                  <span className="text-2xl sm:text-3xl font-black">{currentCalories}</span>
+                  <span className="text-xs text-slate-400">/ {currentUser?.targetCalories} kcal</span>
                 </div>
-                <div className="w-full bg-slate-800 h-2.5 rounded-full mt-3 overflow-hidden">
+                <div className="w-full bg-slate-800 h-2 rounded-full mt-2.5 overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${
                       isBelowBmr ? 'bg-rose-500' : 'bg-gradient-to-r from-amber-400 to-emerald-400'
@@ -816,49 +840,49 @@ export default function App() {
               )}
             </div>
 
-            <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-2xl flex flex-col justify-between">
+            <div className="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+              <div className="bg-indigo-50/50 border border-indigo-100 p-3.5 rounded-2xl flex flex-col justify-between">
                 <div>
-                  <div className="flex justify-between items-center mb-1">
+                  <div className="flex justify-between items-center mb-0.5">
                     <span className="text-xs font-black text-indigo-900">P（タンパク質）</span>
                     <span className="text-xs font-black text-indigo-600">{currentP}g</span>
                   </div>
-                  <p className="text-[10px] text-slate-500">目標: {currentUser.targetP}g</p>
+                  <p className="text-[10px] text-slate-500">目標: {currentUser?.targetP}g</p>
                 </div>
-                <div className="mt-3">
-                  <div className="w-full bg-indigo-100 h-2 rounded-full overflow-hidden">
+                <div className="mt-2.5">
+                  <div className="w-full bg-indigo-100 h-1.5 rounded-full overflow-hidden">
                     <div className="bg-indigo-600 h-full rounded-full transition-all duration-500" style={{ width: `${pPercent}%` }}></div>
                   </div>
                   <span className="text-[10px] font-bold text-indigo-600 block text-right mt-1">{pPercent}%</span>
                 </div>
               </div>
 
-              <div className="bg-amber-50/50 border border-amber-100 p-4 rounded-2xl flex flex-col justify-between">
+              <div className="bg-amber-50/50 border border-amber-100 p-3.5 rounded-2xl flex flex-col justify-between">
                 <div>
-                  <div className="flex justify-between items-center mb-1">
+                  <div className="flex justify-between items-center mb-0.5">
                     <span className="text-xs font-black text-amber-900">F（脂質）</span>
                     <span className="text-xs font-black text-amber-600">{currentF}g</span>
                   </div>
-                  <p className="text-[10px] text-slate-500">目標: {currentUser.targetF}g</p>
+                  <p className="text-[10px] text-slate-500">目標: {currentUser?.targetF}g</p>
                 </div>
-                <div className="mt-3">
-                  <div className="w-full bg-amber-100 h-2 rounded-full overflow-hidden">
+                <div className="mt-2.5">
+                  <div className="w-full bg-amber-100 h-1.5 rounded-full overflow-hidden">
                     <div className="bg-amber-500 h-full rounded-full transition-all duration-500" style={{ width: `${fPercent}%` }}></div>
                   </div>
                   <span className="text-[10px] font-bold text-amber-600 block text-right mt-1">{fPercent}%</span>
                 </div>
               </div>
 
-              <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-2xl flex flex-col justify-between">
+              <div className="bg-emerald-50/50 border border-emerald-100 p-3.5 rounded-2xl flex flex-col justify-between">
                 <div>
-                  <div className="flex justify-between items-center mb-1">
+                  <div className="flex justify-between items-center mb-0.5">
                     <span className="text-xs font-black text-emerald-900">C（炭水化物）</span>
                     <span className="text-xs font-black text-emerald-600">{currentC}g</span>
                   </div>
-                  <p className="text-[10px] text-slate-500">目標: {currentUser.targetC}g</p>
+                  <p className="text-[10px] text-slate-500">目標: {currentUser?.targetC}g</p>
                 </div>
-                <div className="mt-3">
-                  <div className="w-full bg-emerald-100 h-2 rounded-full overflow-hidden">
+                <div className="mt-2.5">
+                  <div className="w-full bg-emerald-100 h-1.5 rounded-full overflow-hidden">
                     <div className="bg-emerald-600 h-full rounded-full transition-all duration-500" style={{ width: `${cPercent}%` }}></div>
                   </div>
                   <span className="text-[10px] font-bold text-emerald-600 block text-right mt-1">{cPercent}%</span>
@@ -869,24 +893,24 @@ export default function App() {
         </div>
 
         {/* 自動生成 LINEアドバイス表示エリア */}
-        <div className="p-6 rounded-3xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md space-y-3">
+        <div className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <MessageSquare className="w-5 h-5" />
-              <h3 className="font-bold text-base">遺伝子＆PFC判定 LINEフィードバック文章</h3>
+              <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
+              <h3 className="font-bold text-sm sm:text-base">LINEフィードバック文章</h3>
             </div>
-            <span className="text-xs bg-white/20 px-3 py-1 rounded-full font-bold">InBody ＋ chatGENE</span>
+            <span className="text-[10px] sm:text-xs bg-white/20 px-2.5 py-0.5 rounded-full font-bold">自動最適化</span>
           </div>
-          <p className="text-xs text-emerald-50 leading-relaxed bg-black/20 p-4 rounded-2xl border border-white/10 font-sans whitespace-pre-wrap">
-            {currentUser.adviceMessage}
+          <p className="text-xs text-emerald-50 leading-relaxed bg-black/20 p-3.5 rounded-xl sm:rounded-2xl border border-white/10 font-sans whitespace-pre-wrap">
+            {currentUser?.adviceMessage}
           </p>
           <div className="flex justify-end pt-1">
             <button
               type="button"
-              onClick={() => copyToClipboard(currentUser.adviceMessage, 'LINEフィードバック文章をコピーしました！')}
-              className="px-4 py-2.5 rounded-xl bg-white text-emerald-800 text-xs font-bold flex items-center gap-1.5 shadow-sm hover:bg-emerald-50"
+              onClick={() => copyToClipboard(currentUser?.adviceMessage || '', 'LINEフィードバック文章をコピーしました！')}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm hover:bg-emerald-50"
             >
-              <Copy className="w-4 h-4" />
+              <Copy className="w-3.5 h-3.5" />
               <span>そのままLINEに送信（文章をコピー）</span>
             </button>
           </div>
@@ -896,7 +920,7 @@ export default function App() {
       {/* 👤 新規会員追加 モーダル */}
       {isAddUserModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-emerald-600" />
@@ -917,27 +941,24 @@ export default function App() {
                   placeholder="例：山﨑 知子"
                   value={newUserName}
                   onChange={(e) => setNewUserName(e.target.value)}
-                  className="w-full p-3.5 border-2 border-emerald-200 rounded-2xl text-sm font-bold focus:border-emerald-600 focus:ring-0 outline-none"
+                  className="w-full p-3 border-2 border-emerald-200 rounded-xl text-sm font-bold focus:border-emerald-600 focus:ring-0 outline-none"
                   autoFocus
                 />
               </div>
-              <p className="text-[11px] text-slate-500 leading-relaxed bg-emerald-50 p-3 rounded-xl border border-emerald-100">
-                💡 登録後、「InBody結果読み込み」や「遺伝子検査結果 (Excel)」をアップロードすると、数値や遺伝子タイプが自動でカルテに反映されます。
-              </p>
             </div>
 
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setIsAddUserModalOpen(false)}
-                className="flex-1 py-3 rounded-2xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50"
               >
                 キャンセル
               </button>
               <button
                 type="button"
                 onClick={handleAddNewUserOnlyName}
-                className="flex-1 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md transition-all"
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md transition-all"
               >
                 登録して完了
               </button>
@@ -946,17 +967,14 @@ export default function App() {
         </div>
       )}
 
-      {/* 🧬 遺伝子検査結果 (Excel) 自動読み込み モーダル */}
+      {/* 🧬 遺伝子検査結果 (Excel) モーダル */}
       {isGeneExcelModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
-                <FileSpreadsheet className="w-6 h-6 text-amber-600" />
-                <div>
-                  <h3 className="font-black text-slate-800 text-base">遺伝子検査結果 (Excel) 自動解析</h3>
-                  <p className="text-[10px] text-slate-500">Excelファイルをドラッグ＆ドロップで選択・全自動判定</p>
-                </div>
+                <FileSpreadsheet className="w-5 h-5 text-amber-600" />
+                <h3 className="font-black text-slate-800 text-base">遺伝子検査結果 (Excel) 解析</h3>
               </div>
               <button type="button" onClick={() => setIsGeneExcelModalOpen(false)} className="p-1 rounded-full text-slate-400">
                 <X className="w-5 h-5" />
@@ -977,19 +995,18 @@ export default function App() {
 
               <div
                 onClick={() => excelFileInputRef.current?.click()}
-                className="border-2 border-dashed border-amber-300 bg-amber-50/40 rounded-2xl p-6 text-center cursor-pointer hover:border-amber-500 min-h-[150px] flex items-center justify-center transition-all"
+                className="border-2 border-dashed border-amber-300 bg-amber-50/40 rounded-2xl p-5 text-center cursor-pointer hover:border-amber-500 min-h-[130px] flex items-center justify-center transition-all"
               >
                 {geneExcelFile ? (
                   <div className="space-y-1">
-                    <FileSpreadsheet className="w-10 h-10 text-amber-600 mx-auto" />
+                    <FileSpreadsheet className="w-8 h-8 text-amber-600 mx-auto" />
                     <p className="text-xs font-black text-slate-800">{geneExcelFile.name}</p>
                     <p className="text-[10px] text-amber-600 font-bold">ファイル読み込み完了</p>
                   </div>
                 ) : (
                   <div>
-                    <Upload className="w-9 h-9 text-amber-500 mx-auto mb-2" />
-                    <p className="text-xs font-bold text-slate-700">遺伝子検査のExcelファイル（.xlsx/.xls）を選択</p>
-                    <p className="text-[10px] text-slate-400 mt-1">※chatGENE等の解析結果データを自動解析します</p>
+                    <Upload className="w-8 h-8 text-amber-500 mx-auto mb-1.5" />
+                    <p className="text-xs font-bold text-slate-700">Excelファイル（.xlsx/.xls）を選択</p>
                   </div>
                 )}
               </div>
@@ -998,47 +1015,27 @@ export default function App() {
                 type="button"
                 onClick={runGeneExcelScan}
                 disabled={isParsingExcel || !geneExcelFile}
-                className={`w-full py-3.5 rounded-2xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
+                className={`w-full py-3 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
                   geneExcelFile ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-slate-200 text-slate-400'
                 }`}
               >
                 <Sparkles className="w-4 h-4 text-amber-200" />
-                <span>{isParsingExcel ? 'Excelデータを自動解析中...' : 'Excelファイルを自動解析'}</span>
+                <span>{isParsingExcel ? 'Excelを解析中...' : 'Excelを自動解析'}</span>
               </button>
             </div>
 
             {parsedGeneProfile && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between border-b border-amber-200/80 pb-2">
-                  <span className="text-xs font-black text-amber-900 flex items-center gap-1">
-                    <CheckCircle2 className="w-4 h-4 text-amber-600" /> Excel解析・自動判定成功
-                  </span>
-                </div>
-
-                <div className="space-y-2 text-xs">
-                  <div className="bg-white p-3 rounded-xl border border-amber-100">
-                    <span className="text-[10px] text-slate-500 block font-bold">判定された主リスクタイプ</span>
-                    <strong className="text-sm text-amber-800 font-black">{parsedGeneProfile.typeName}</strong>
-                  </div>
-
-                  <div className="bg-white p-3 rounded-xl border border-amber-100 space-y-1">
-                    <span className="text-[10px] text-slate-500 block font-bold">検出された栄養素代謝リスク</span>
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {parsedGeneProfile.folicAcidLow && <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] font-bold">葉酸濃度 低</span>}
-                      {parsedGeneProfile.ironLow && <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] font-bold">鉄分濃度 低</span>}
-                      {parsedGeneProfile.vitaminCLow && <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-[10px] font-bold">ビタミンC濃度 低</span>}
-                      {parsedGeneProfile.exerciseEffectLow && <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded text-[10px] font-bold">運動減量効果 低</span>}
-                    </div>
-                  </div>
-                </div>
-
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-3">
+                <span className="text-xs font-black text-amber-900 flex items-center gap-1">
+                  <CheckCircle2 className="w-4 h-4 text-amber-600" /> Excel解析・自動判定成功
+                </span>
+                <p className="text-xs font-bold text-amber-900">{parsedGeneProfile.typeName}</p>
                 <button
                   type="button"
                   onClick={saveGeneExcelToProfile}
-                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                  className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all"
                 >
-                  <Database className="w-4 h-4 text-emerald-400" />
-                  <span>この解析結果でカルテ＆PFCを自動最適化保存</span>
+                  カルテに自動反映・保存
                 </button>
               </div>
             )}
@@ -1049,14 +1046,11 @@ export default function App() {
       {/* 📸 InBody AI OCRスキャン モーダル */}
       {isInbodyModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
-                <Scan className="w-6 h-6 text-indigo-600" />
-                <div>
-                  <h3 className="font-black text-slate-800 text-base">InBody測定結果 自動読み込み</h3>
-                  <p className="text-[10px] text-slate-500">写真をアップロードするだけでカルテに必要な全数値を自動抽出</p>
-                </div>
+                <Scan className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-black text-slate-800 text-base">InBody測定結果 自動読み込み</h3>
               </div>
               <button type="button" onClick={() => setIsInbodyModalOpen(false)} className="p-1 rounded-full text-slate-400">
                 <X className="w-5 h-5" />
@@ -1081,15 +1075,14 @@ export default function App() {
 
               <div
                 onClick={() => inbodyFileInputRef.current?.click()}
-                className="border-2 border-dashed border-indigo-200 bg-indigo-50/30 rounded-2xl p-6 text-center cursor-pointer hover:border-indigo-500 min-h-[160px] flex items-center justify-center transition-all"
+                className="border-2 border-dashed border-indigo-200 bg-indigo-50/30 rounded-2xl p-5 text-center cursor-pointer hover:border-indigo-500 min-h-[140px] flex items-center justify-center transition-all"
               >
                 {inbodyImage ? (
-                  <img src={inbodyImage} alt="InBodyシート" className="max-h-44 object-contain rounded-lg shadow" />
+                  <img src={inbodyImage} alt="InBodyシート" className="max-h-40 object-contain rounded-lg shadow" />
                 ) : (
                   <div>
-                    <Upload className="w-9 h-9 text-indigo-400 mx-auto mb-2" />
-                    <p className="text-xs font-bold text-slate-700">InBodyの測定結果シート画像を選択・撮影</p>
-                    <p className="text-[10px] text-slate-400 mt-1">※基礎代謝量・体重・骨格筋量・体脂肪率をAIが自動で全取得します</p>
+                    <Upload className="w-8 h-8 text-indigo-400 mx-auto mb-1.5" />
+                    <p className="text-xs font-bold text-slate-700">InBodyの測定結果写真をアップロード</p>
                   </div>
                 )}
               </div>
@@ -1098,50 +1091,34 @@ export default function App() {
                 type="button"
                 onClick={runInbodyOcrScan}
                 disabled={isScanningInbody || !inbodyImage}
-                className={`w-full py-3.5 rounded-2xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
+                className={`w-full py-3 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
                   inbodyImage ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-200 text-slate-400'
                 }`}
               >
                 <Scan className="w-4 h-4" />
-                <span>{isScanningInbody ? 'InBodyシートをAI解析中...' : '画像をAIスキャンして自動入力'}</span>
+                <span>{isScanningInbody ? 'InBodyシートをAI解析中...' : '画像をスキャンして自動入力'}</span>
               </button>
             </div>
 
             {scannedInbodyData && (
-              <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between border-b border-indigo-200/60 pb-2">
-                  <span className="text-xs font-black text-indigo-900 flex items-center gap-1">
-                    <CheckCircle2 className="w-4 h-4 text-indigo-600" /> AI解析・自動抽出成功
-                  </span>
-                  <span className="text-[10px] text-indigo-600 font-bold">{scannedInbodyData.date} 測定</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3.5 space-y-3">
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-white p-2 rounded-lg border border-indigo-100">
                     <span className="text-[10px] text-slate-500 block">体重</span>
-                    <strong className="text-base text-slate-800">{scannedInbodyData.weight} kg</strong>
+                    <strong className="text-sm text-slate-800">{scannedInbodyData.weight} kg</strong>
                   </div>
-                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
-                    <span className="text-[10px] text-slate-500 block">骨格筋量</span>
-                    <strong className="text-base text-indigo-600">{scannedInbodyData.muscleMass} kg</strong>
-                  </div>
-                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
-                    <span className="text-[10px] text-slate-500 block">体脂肪率</span>
-                    <strong className="text-base text-amber-600">{scannedInbodyData.bodyFatRatio} %</strong>
-                  </div>
-                  <div className="bg-white p-2.5 rounded-xl border border-indigo-100">
-                    <span className="text-[10px] text-slate-500 block">実測 基礎代謝 (BMR)</span>
-                    <strong className="text-base text-rose-600">{scannedInbodyData.bmr} kcal</strong>
+                  <div className="bg-white p-2 rounded-lg border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">実測 基礎代謝</span>
+                    <strong className="text-sm text-rose-600">{scannedInbodyData.bmr} kcal</strong>
                   </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={saveInbodyToProfile}
-                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                  className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all"
                 >
-                  <Database className="w-4 h-4 text-emerald-400" />
-                  <span>この自動入力データでカルテを完成・保存</span>
+                  カルテに反映・保存
                 </button>
               </div>
             )}
@@ -1152,7 +1129,7 @@ export default function App() {
       {/* 数値再計算モーダル */}
       {isCalcModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <Calculator className="w-5 h-5 text-emerald-600" />
@@ -1272,37 +1249,37 @@ export default function App() {
       {/* AI解析モーダル */}
       {isAiModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-emerald-600" />
-                <h3 className="font-black text-slate-800 text-lg">LINE食事投稿 AI解析＆アドバイス自動生成</h3>
+                <h3 className="font-black text-slate-800 text-base">LINE食事投稿 AI解析＆アドバイス生成</h3>
               </div>
               <button type="button" onClick={() => setIsAiModalOpen(false)} className="p-1 rounded-full text-slate-400">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex bg-slate-100 p-1 rounded-2xl text-xs font-bold">
+            <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
               <button
                 type="button"
                 onClick={() => setActiveTab('image')}
-                className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-2 ${
+                className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 ${
                   activeTab === 'image' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
                 }`}
               >
                 <ImageIcon className="w-4 h-4" />
-                <span>LINEスクショ/写真投稿</span>
+                <span>写真投稿</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('text')}
-                className={`flex-1 py-2 rounded-xl flex items-center justify-center gap-2 ${
+                className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 ${
                   activeTab === 'text' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
                 }`}
               >
                 <FileText className="w-4 h-4" />
-                <span>LINE文章コピペ</span>
+                <span>文章コピペ</span>
               </button>
             </div>
 
@@ -1318,14 +1295,14 @@ export default function App() {
                 }} className="hidden" />
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-300 rounded-2xl p-6 text-center cursor-pointer hover:border-emerald-500 min-h-[140px] flex items-center justify-center bg-slate-50/50"
+                  className="border-2 border-dashed border-slate-300 rounded-2xl p-5 text-center cursor-pointer hover:border-emerald-500 min-h-[130px] flex items-center justify-center bg-slate-50/50"
                 >
                   {selectedImage ? (
-                    <img src={selectedImage} alt="選択画像" className="max-h-36 object-contain rounded-lg shadow" />
+                    <img src={selectedImage} alt="選択画像" className="max-h-32 object-contain rounded-lg shadow" />
                   ) : (
                     <div>
-                      <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                      <p className="text-xs font-bold text-slate-700">クリックしてLINEの写真・スクショを選択</p>
+                      <Upload className="w-8 h-8 text-slate-400 mx-auto mb-1.5" />
+                      <p className="text-xs font-bold text-slate-700">クリックしてLINE写真・スクショを選択</p>
                     </div>
                   )}
                 </div>
@@ -1337,8 +1314,8 @@ export default function App() {
                 rows={3}
                 value={pastedText}
                 onChange={(e) => setPastedText(e.target.value)}
-                placeholder="例：お昼にサバの塩焼き定食とごはん普通盛りを食べました！"
-                className="w-full p-3.5 border border-slate-300 rounded-2xl text-xs outline-none focus:border-emerald-500"
+                placeholder="例：お昼にサバの塩焼き定食を食べました！"
+                className="w-full p-3 border border-slate-300 rounded-xl text-xs outline-none focus:border-emerald-500"
               ></textarea>
             )}
 
@@ -1346,52 +1323,24 @@ export default function App() {
               type="button"
               onClick={runAiAnalysis}
               disabled={isAnalyzing}
-              className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
             >
               <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>{isAnalyzing ? 'AI解析＆文章作成中...' : '食事を解析してLINEアドバイスを作成'}</span>
+              <span>{isAnalyzing ? 'AI解析中...' : '食事解析してLINEアドバイス作成'}</span>
             </button>
 
             {analysisResult && generatedAdvice && (
               <div className="space-y-3 pt-2 border-t border-slate-100">
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-md">
-                      解析結果: {analysisResult.calories} kcal
-                    </span>
-                    <div className="text-[11px] font-bold space-x-2 text-slate-600">
-                      <span>P:{analysisResult.p}g</span>
-                      <span>F:{analysisResult.f}g</span>
-                      <span>C:{analysisResult.c}g</span>
-                    </div>
-                  </div>
-                  <p className="text-xs font-bold text-slate-800">{analysisResult.name}</p>
-                </div>
-
-                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-900 flex items-center gap-1">
-                      <MessageSquare className="w-4 h-4 text-emerald-600" /> 遺伝子＆PFC最適化 LINE文案
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(generatedAdvice, '生成文案をコピーしました')}
-                      className="text-[10px] font-bold bg-white text-emerald-700 border border-emerald-300 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-sm"
-                    >
-                      <Copy className="w-3 h-3" /> コピー
-                    </button>
-                  </div>
-
-                  <p className="text-xs text-slate-700 leading-relaxed font-sans whitespace-pre-wrap bg-white p-3 rounded-xl border border-emerald-100">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 space-y-2">
+                  <p className="text-xs text-slate-700 leading-relaxed font-sans whitespace-pre-wrap bg-white p-2.5 rounded-lg border border-emerald-100">
                     {generatedAdvice}
                   </p>
-
                   <button
                     type="button"
                     onClick={saveAnalyzedMeal}
-                    className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all"
+                    className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all"
                   >
-                    食事ログに追加してカルテに保存
+                    食事ログに追加保存
                   </button>
                 </div>
               </div>
@@ -1401,8 +1350,8 @@ export default function App() {
       )}
 
       {/* フッター */}
-      <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
-        サクラ整骨院 PFC Balance Manager (Staff Edition)
+      <footer className="border-t border-slate-200 bg-white py-3 text-center text-[10px] text-slate-500">
+        サクラ整骨院 PFC Balance Manager (Mobile & Staff Edition)
       </footer>
     </div>
   );
