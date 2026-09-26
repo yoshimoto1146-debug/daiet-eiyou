@@ -21,6 +21,9 @@ import {
   FileText,
   MessageSquare,
   ShieldCheck,
+  Edit2,
+  Utensils,
+  Plus,
 } from 'lucide-react';
 
 type MealCategory = '朝食' | '昼食' | '夕食' | '間食';
@@ -40,6 +43,7 @@ interface MealItem {
   p: number;
   f: number;
   c: number;
+  imageUrl?: string;
 }
 
 interface InBodyRecord {
@@ -125,7 +129,6 @@ const calculateLogicalTargetsWithHB = (
     targetCalories = bmr;
   }
 
-  // 🧬 遺伝子解析タイプに応じた目標PFC比率
   let pRatio = 0.25, fRatio = 0.25, cRatio = 0.50;
 
   switch (geneProfile.type) {
@@ -153,7 +156,7 @@ const calculateLogicalTargetsWithHB = (
   return { targetCalories, targetP, targetF, targetC, bmr, tdee, isInbody };
 };
 
-// LINEフィードバック文章生成
+// LINEフィードバック文章自動生成
 const generateLineAdvice = (user: UserProfile, newMeal?: MealItem): string => {
   const currentMealCal = newMeal ? newMeal.calories : 0;
   const futureTotalCal = user.todayMeals.reduce((acc, m) => acc + m.calories, 0) + currentMealCal;
@@ -171,10 +174,10 @@ const generateLineAdvice = (user: UserProfile, newMeal?: MealItem): string => {
   }
 
   if (futureTotalCal === 0) {
-    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、遺伝子検査（chatGENE）Excelの解析が完了しました！\n「${gene.typeName}」の体質に合わせ、目標PFCバランス（P:${user.targetP}g / F:${user.targetF}g / C:${user.targetC}g）を自動調整いたしました。\n${geneNutrientAdvice}`;
+    return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、本日の食事ログを記録していきましょう！\n「${gene.typeName}」の体質に合わせ、目標PFCバランス（P:${user.targetP}g / F:${user.targetF}g / C:${user.targetC}g）で調整しています。\n${geneNutrientAdvice}`;
   }
 
-  return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、お写真のご投稿ありがとうございます！\n\n本日の合計は【${futureTotalCal} kcal】（目標: ${user.targetCalories} kcal）で順調に推移しています。\n（P: ${futureTotalP}g / F: ${futureTotalF}g / C: ${futureTotalC}g）\n\n${geneNutrientAdvice}`;
+  return `【サクラ整骨院 栄養フィードバック】\n${user.name}様、食事ログの記録ありがとうございます！\n\n本日の合計は【${futureTotalCal} kcal】（目標: ${user.targetCalories} kcal）で推移しています。\n（P: ${futureTotalP}g / F: ${futureTotalF}g / C: ${futureTotalC}g）\n\n${geneNutrientAdvice}`;
 };
 
 const INITIAL_USERS: Record<string, UserProfile> = {
@@ -209,10 +212,10 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     targetF: 27,
     targetC: 175,
     todayMeals: [
-      { id: 'm1', category: '朝食', name: '鮭塩焼き・玄米ご飯', calories: 420, p: 28, f: 10, c: 55 }
+      { id: 'm1', category: '朝食', name: '鮭塩焼き・玄米ご飯・味噌汁', calories: 420, p: 28, f: 10, c: 55 }
     ],
     inbodyHistory: [{ date: '2026-08-01', weight: 59.5, muscleMass: 20.1, bodyFatRatio: 29.2, bmr: 1245 }],
-    adviceMessage: '【サクラ整骨院 栄養フィードバック】\n佐藤佳代様、遺伝子検査（chatGENE）Excelの解析が完了しました！\n「脂質吸収過多・皮下脂肪タイプ」の体質に合わせ、目標PFCバランス（P:101g / F:27g / C:175g）を自動調整いたしました。',
+    adviceMessage: '【サクラ整骨院 栄養フィードバック】\n佐藤佳代様、食事ログのご提出ありがとうございます！\n「脂質吸収過多・皮下脂肪タイプ」に合わせて目標PFCバランス（P:101g / F:27g / C:175g）で進行中です。',
   },
 };
 
@@ -232,6 +235,7 @@ export default function App() {
   const [isParsingExcel, setIsParsingExcel] = useState(false);
   const [parsedGeneProfile, setParsedGeneProfile] = useState<GeneProfile | null>(null);
 
+  // AI食事解析モーダルState
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'image' | 'text'>('image');
   const [pastedText, setPastedText] = useState('');
@@ -239,6 +243,9 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<MealCategory>('昼食');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<MealItem | null>(null);
+
+  // 食事編集モーダルState
+  const [editingMeal, setEditingMeal] = useState<MealItem | null>(null);
 
   const [isInbodyModalOpen, setIsInbodyModalOpen] = useState(false);
   const [inbodyImage, setInbodyImage] = useState<string | null>(null);
@@ -266,6 +273,45 @@ export default function App() {
   const copyToClipboard = (text: string, msg: string) => {
     navigator.clipboard.writeText(text);
     showToast(msg);
+  };
+
+  // 🗑️ 食事ログの削除機能
+  const handleDeleteMeal = (mealId: string) => {
+    if (window.confirm('この食事ログを削除してもよろしいですか？')) {
+      const updatedMeals = currentUser.todayMeals.filter((m) => m.id !== mealId);
+      const updatedUser = { ...currentUser, todayMeals: updatedMeals };
+      const newAdvice = generateLineAdvice(updatedUser);
+
+      setUsers((prev) => ({
+        ...prev,
+        [selectedUserId]: {
+          ...updatedUser,
+          adviceMessage: newAdvice,
+        },
+      }));
+
+      showToast('食事ログを削除しました。');
+    }
+  };
+
+  // ✏️ 食事ログの更新保存機能
+  const handleSaveEditedMeal = () => {
+    if (!editingMeal) return;
+
+    const updatedMeals = currentUser.todayMeals.map((m) => (m.id === editingMeal.id ? editingMeal : m));
+    const updatedUser = { ...currentUser, todayMeals: updatedMeals };
+    const newAdvice = generateLineAdvice(updatedUser);
+
+    setUsers((prev) => ({
+      ...prev,
+      [selectedUserId]: {
+        ...updatedUser,
+        adviceMessage: newAdvice,
+      },
+    }));
+
+    setEditingMeal(null);
+    showToast('食事ログの不整合・内容を修正・保存しました！');
   };
 
   const handleDeleteUser = () => {
@@ -303,18 +349,7 @@ export default function App() {
       exerciseEffectLow: false,
     };
 
-    const calculated = calculateLogicalTargetsWithHB(
-      'female',
-      35,
-      158,
-      55,
-      0,
-      0,
-      50,
-      3,
-      1.45,
-      defaultGene
-    );
+    const calculated = calculateLogicalTargetsWithHB('female', 35, 158, 55, 0, 0, 50, 3, 1.45, defaultGene);
 
     const newUserObj: UserProfile = {
       id: newId,
@@ -349,7 +384,7 @@ export default function App() {
     showToast(`「${newUserName.trim()} 様」を追加しました！`);
   };
 
-  // 🧬 Excel優先分類自動解析ロジック（成功設定）
+  // 🧬 Excel解析ロジック
   const runGeneExcelScan = async () => {
     if (!geneExcelFile) return alert('遺伝子検査のExcelファイル（.xlsx/.xls）を選択してください');
     setIsParsingExcel(true);
@@ -583,6 +618,7 @@ export default function App() {
     showToast('InBody実測数値からカルテを自動生成・保存しました！');
   };
 
+  // AI解析実行
   const runAiAnalysis = () => {
     if (activeTab === 'image' && !selectedImage) return alert('画像を選択してください');
     if (activeTab === 'text' && !pastedText.trim()) return alert('文章を入力してください');
@@ -593,36 +629,49 @@ export default function App() {
       const parsedMeal: MealItem = {
         id: `ai-${Date.now()}`,
         category: selectedCategory,
-        name: activeTab === 'text' ? `解析: ${pastedText.slice(0, 18)}` : '解析: 豚生姜焼き定食・小鉢セット',
-        calories: 580,
-        p: 34,
-        f: 18,
-        c: 68,
+        name: activeTab === 'text' ? `解析: ${pastedText.slice(0, 18)}` : `解析: ${selectedCategory}メニュー（定食・小鉢）`,
+        calories: selectedCategory === '間食' ? 180 : 540,
+        p: selectedCategory === '間食' ? 12 : 32,
+        f: selectedCategory === '間食' ? 6 : 16,
+        c: selectedCategory === '間食' ? 22 : 62,
+        imageUrl: selectedImage || undefined,
       };
       setAnalysisResult(parsedMeal);
-      showToast('AI解析＆LINE文章生成が完了しました！');
+      showToast('AI解析完了！内容を確認して保存してください。');
     }, 1200);
   };
 
+  // 解析結果を食事ログに追加保存
   const saveAnalyzedMeal = () => {
     if (!analysisResult) return;
-    const advice = generateLineAdvice(currentUser, analysisResult);
+
+    const updatedUser = {
+      ...currentUser,
+      todayMeals: [...currentUser.todayMeals, analysisResult],
+    };
+    const advice = generateLineAdvice(updatedUser);
+
     setUsers((prev) => ({
       ...prev,
       [selectedUserId]: {
-        ...prev[selectedUserId],
-        todayMeals: [...prev[selectedUserId].todayMeals, analysisResult],
+        ...updatedUser,
         adviceMessage: advice,
       },
     }));
-    showToast('食事ログに追加し、アドバイスを更新しました！');
+
+    showToast(`「${analysisResult.category}」の食事ログをトップ画面に追加しました！`);
     setIsAiModalOpen(false);
+    setAnalysisResult(null);
+    setSelectedImage(null);
+    setPastedText('');
   };
 
   const calPercent = currentUser?.targetCalories > 0 ? Math.min(Math.round((currentCalories / currentUser.targetCalories) * 100), 100) : 0;
   const pPercent = currentUser?.targetP > 0 ? Math.min(Math.round((currentP / currentUser.targetP) * 100), 100) : 0;
   const fPercent = currentUser?.targetF > 0 ? Math.min(Math.round((currentF / currentUser.targetF) * 100), 100) : 0;
   const cPercent = currentUser?.targetC > 0 ? Math.min(Math.round((currentC / currentUser.targetC) * 100), 100) : 0;
+
+  const categoriesList: MealCategory[] = ['朝食', '昼食', '夕食', '間食'];
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans">
@@ -634,7 +683,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 以前のUI通りのヘッダー */}
+      {/* ヘッダー */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
         <div className="max-w-6xl mx-auto px-3 py-2.5 sm:px-4 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
           <div className="flex items-center gap-2.5">
@@ -687,7 +736,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* メインカルテ構成（画像通りの埋め込みレイアウト） */}
+      {/* メイン画面 */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-3 py-4 sm:px-4 sm:py-6 space-y-4 sm:space-y-6">
         
         {/* ① 黒色カルテカード */}
@@ -717,7 +766,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsInbodyModalOpen(true)}
-                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 shadow"
+                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 shadow cursor-pointer"
               >
                 <Scan className="w-3.5 h-3.5 text-indigo-200" />
                 <span>InBody読み込み</span>
@@ -726,7 +775,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsGeneExcelModalOpen(true)}
-                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 shadow"
+                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 shadow cursor-pointer"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-amber-200" />
                 <span>遺伝子 (Excel)</span>
@@ -738,7 +787,7 @@ export default function App() {
                   setCalcForm(currentUser);
                   setIsCalcModalOpen(true);
                 }}
-                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 border border-slate-700 shadow"
+                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 border border-slate-700 shadow cursor-pointer"
               >
                 <Calculator className="w-3.5 h-3.5 text-emerald-400" />
                 <span>数値再計算</span>
@@ -747,7 +796,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsAiModalOpen(true)}
-                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 shadow"
+                className="px-3 py-2 sm:px-3.5 rounded-xl sm:rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 shadow cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                 <span>AI食事解析</span>
@@ -885,6 +934,83 @@ export default function App() {
           </div>
         </div>
 
+        {/* 🍽️ 新機能：トップ画面の食事ログ一覧表示（朝・昼・夕・間食） ＆ 編集・削除 */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm border border-slate-200 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <Utensils className="w-5 h-5 text-emerald-600" />
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base">本日の登録食事一覧（朝・昼・夕・間食）</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsAiModalOpen(true)}
+              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>食事ログを追加</span>
+            </button>
+          </div>
+
+          {currentUser.todayMeals.length === 0 ? (
+            <div className="text-center py-8 text-slate-400 text-xs font-medium bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+              まだ登録された食事ログがありません。「AI食事解析」から追加してください。
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {currentUser.todayMeals.map((meal) => (
+                <div
+                  key={meal.id}
+                  className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between gap-3 hover:border-emerald-300 transition-all"
+                >
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    {meal.imageUrl ? (
+                      <img src={meal.imageUrl} alt={meal.name} className="w-14 h-14 rounded-xl object-cover shrink-0 shadow-sm" />
+                    ) : (
+                      <div className="w-14 h-14 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-black text-xs shrink-0">
+                        {meal.category}
+                      </div>
+                    )}
+                    <div className="truncate">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full">
+                          {meal.category}
+                        </span>
+                        <span className="text-xs font-black text-slate-800 truncate">{meal.name}</span>
+                      </div>
+                      <p className="text-sm font-black text-amber-600">
+                        {meal.calories} <span className="text-[10px] text-slate-500 font-normal">kcal</span>
+                      </p>
+                      <p className="text-[10px] font-bold text-slate-500">
+                        P: {meal.p}g / F: {meal.f}g / C: {meal.c}g
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 編集 ＆ 削除ボタン */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setEditingMeal(meal)}
+                      title="この食事ログを修正・編集"
+                      className="p-2 bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-xl transition-all cursor-pointer"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteMeal(meal.id)}
+                      title="この食事ログを削除"
+                      className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* ③ 翡翠色LINEフィードバックカード */}
         <div className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md space-y-3">
           <div className="flex items-center justify-between">
@@ -901,7 +1027,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => copyToClipboard(currentUser?.adviceMessage || '', 'LINEフィードバック文章をコピーしました！')}
-              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm hover:bg-emerald-50"
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm hover:bg-emerald-50 cursor-pointer"
             >
               <Copy className="w-3.5 h-3.5" />
               <span>そのままLINEに送信（文章をコピー）</span>
@@ -909,6 +1035,109 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* ✏️ 食事不整合修正・編集モーダル */}
+      {editingMeal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Edit2 className="w-5 h-5 text-emerald-600" />
+                <h3 className="font-black text-slate-800 text-base">食事ログの不整合・数値修正</h3>
+              </div>
+              <button type="button" onClick={() => setEditingMeal(null)} className="p-1 rounded-full text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">区分（カテゴリー）</label>
+                <div className="grid grid-cols-4 gap-1">
+                  {categoriesList.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setEditingMeal({ ...editingMeal, category: cat })}
+                      className={`py-1.5 rounded-lg text-xs font-bold ${
+                        editingMeal.category === cat ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-600 block mb-1">メニュー・食品名</label>
+                <input
+                  type="text"
+                  value={editingMeal.name}
+                  onChange={(e) => setEditingMeal({ ...editingMeal, name: e.target.value })}
+                  className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">カロリー (kcal)</label>
+                  <input
+                    type="number"
+                    value={editingMeal.calories}
+                    onChange={(e) => setEditingMeal({ ...editingMeal, calories: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">P タンパク質 (g)</label>
+                  <input
+                    type="number"
+                    value={editingMeal.p}
+                    onChange={(e) => setEditingMeal({ ...editingMeal, p: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">F 脂質 (g)</label>
+                  <input
+                    type="number"
+                    value={editingMeal.f}
+                    onChange={(e) => setEditingMeal({ ...editingMeal, f: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">C 炭水化物 (g)</label>
+                  <input
+                    type="number"
+                    value={editingMeal.c}
+                    onChange={(e) => setEditingMeal({ ...editingMeal, c: Number(e.target.value) })}
+                    className="w-full p-2.5 border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingMeal(null)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEditedMeal}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md"
+              >
+                修正を保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 👤 新規会員追加 モーダル */}
       {isAddUserModalOpen && (
@@ -1009,7 +1238,7 @@ export default function App() {
                 onClick={runGeneExcelScan}
                 disabled={isParsingExcel || !geneExcelFile}
                 className={`w-full py-3 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
-                  geneExcelFile ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-slate-200 text-slate-400'
+                  geneExcelFile ? 'bg-amber-600 hover:bg-amber-700 text-white cursor-pointer' : 'bg-slate-200 text-slate-400'
                 }`}
               >
                 <Sparkles className="w-4 h-4 text-amber-200" />
@@ -1032,7 +1261,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={saveGeneExcelToProfile}
-                  className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all"
+                  className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
                 >
                   判定結果でPFC目標値を更新・保存
                 </button>
@@ -1091,7 +1320,7 @@ export default function App() {
                 onClick={runInbodyOcrScan}
                 disabled={isScanningInbody || !inbodyImage}
                 className={`w-full py-3 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
-                  inbodyImage ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-200 text-slate-400'
+                  inbodyImage ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer' : 'bg-slate-200 text-slate-400'
                 }`}
               >
                 <Scan className="w-4 h-4" />
@@ -1115,7 +1344,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={saveInbodyToProfile}
-                  className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all"
+                  className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
                 >
                   カルテに反映・保存
                 </button>
@@ -1236,7 +1465,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleSaveLogicalTargets}
-                className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-sm"
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
               >
                 計算して設定更新
               </button>
@@ -1245,7 +1474,7 @@ export default function App() {
         </div>
       )}
 
-      {/* AI解析モーダル */}
+      {/* 🍱 AI解析モーダル（区分選択：朝食 / 昼食 / 夕食 / 間食） */}
       {isAiModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
@@ -1259,11 +1488,30 @@ export default function App() {
               </button>
             </div>
 
+            {/* 食事区分切り替えボタン（朝・昼・夕・間食） */}
+            <div>
+              <label className="text-xs font-black text-slate-700 block mb-1.5">1. 食事区分を選択</label>
+              <div className="grid grid-cols-4 gap-1.5 bg-slate-100 p-1.5 rounded-xl">
+                {categoriesList.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      selectedCategory === cat ? 'bg-emerald-600 text-white shadow' : 'text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
               <button
                 type="button"
                 onClick={() => setActiveTab('image')}
-                className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeTab === 'image' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
                 }`}
               >
@@ -1273,7 +1521,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setActiveTab('text')}
-                className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeTab === 'text' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
                 }`}
               >
@@ -1294,7 +1542,7 @@ export default function App() {
                 }} className="hidden" />
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-300 rounded-2xl p-5 text-center cursor-pointer hover:border-emerald-500 min-h-[130px] flex items-center justify-center bg-slate-50/50"
+                  className="border-2 border-dashed border-slate-300 rounded-2xl p-5 text-center cursor-pointer hover:border-emerald-500 min-h-[130px] flex items-center justify-center bg-slate-50/50 transition-all"
                 >
                   {selectedImage ? (
                     <img src={selectedImage} alt="選択画像" className="max-h-32 object-contain rounded-lg shadow" />
@@ -1322,24 +1570,32 @@ export default function App() {
               type="button"
               onClick={runAiAnalysis}
               disabled={isAnalyzing}
-              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>{isAnalyzing ? 'AI解析中...' : '食事解析してLINEアドバイス作成'}</span>
+              <span>{isAnalyzing ? 'AI解析中...' : `【${selectedCategory}】の食事を解析`}</span>
             </button>
 
             {analysisResult && (
               <div className="space-y-3 pt-2 border-t border-slate-100">
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 space-y-2">
-                  <p className="text-xs text-slate-700 leading-relaxed font-sans whitespace-pre-wrap bg-white p-2.5 rounded-lg border border-emerald-100">
-                    {generateLineAdvice(currentUser, analysisResult)}
-                  </p>
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 space-y-3">
+                  <div className="bg-white p-3 rounded-xl border border-emerald-100">
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      解析成功: {analysisResult.category}
+                    </span>
+                    <h4 className="font-black text-slate-800 text-sm mt-1">{analysisResult.name}</h4>
+                    <p className="text-xs font-black text-amber-600 mt-0.5">{analysisResult.calories} kcal</p>
+                    <p className="text-[10px] text-slate-500 font-bold">
+                      P: {analysisResult.p}g / F: {analysisResult.f}g / C: {analysisResult.c}g
+                    </p>
+                  </div>
+
                   <button
                     type="button"
                     onClick={saveAnalyzedMeal}
-                    className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all"
+                    className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
                   >
-                    食事ログに追加保存
+                    トップ画面のカルテに追加登録
                   </button>
                 </div>
               </div>
