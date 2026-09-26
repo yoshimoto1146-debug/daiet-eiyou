@@ -28,6 +28,7 @@ import {
   Database,
   UserPlus,
   Dna,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 type MealCategory = '朝食' | '昼食' | '夕食' | '間食';
@@ -84,6 +85,7 @@ interface UserProfile {
   geneProfile: GeneProfile;
   bmr: number;
   isInbodyMeasured: boolean;
+  isGeneMeasured: boolean;
   tdee: number;
   targetCalories: number;
   targetP: number;
@@ -227,7 +229,8 @@ const INITIAL_USERS: Record<string, UserProfile> = {
       exerciseEffectLow: true,
     },
     bmr: 1260,
-    isInbodyMeasured: false,
+    isInbodyMeasured: true,
+    isGeneMeasured: true,
     tdee: 1827,
     targetCalories: 1347,
     targetP: 101,
@@ -272,6 +275,7 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     },
     bmr: 1580,
     isInbodyMeasured: false,
+    isGeneMeasured: false,
     tdee: 2291,
     targetCalories: 1731,
     targetP: 130,
@@ -295,8 +299,11 @@ export default function App() {
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState('');
 
-  const [isGeneModalOpen, setIsGeneModalOpen] = useState(false);
-  const [geneForm, setGeneForm] = useState<GeneProfile>(INITIAL_USERS['userA'].geneProfile);
+  // 🧬 Excel遺伝子検査結果アップロードモーダルState
+  const [isGeneExcelModalOpen, setIsGeneExcelModalOpen] = useState(false);
+  const [geneExcelFile, setGeneExcelFile] = useState<File | null>(null);
+  const [isParsingExcel, setIsParsingExcel] = useState(false);
+  const [parsedGeneProfile, setParsedGeneProfile] = useState<GeneProfile | null>(null);
 
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'image' | 'text'>('image');
@@ -314,6 +321,7 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inbodyFileInputRef = useRef<HTMLInputElement>(null);
+  const excelFileInputRef = useRef<HTMLInputElement>(null);
   const currentUser = users[selectedUserId];
 
   const currentCalories = currentUser.todayMeals.reduce((acc, m) => acc + m.calories, 0);
@@ -370,7 +378,7 @@ export default function App() {
       age: 35,
       gender: 'female',
       height: 158,
-      weight: 0, // InBodyで自動更新
+      weight: 0,
       muscleMass: 0,
       bodyFatRatio: 0,
       targetWeight: 0,
@@ -379,6 +387,7 @@ export default function App() {
       geneProfile: defaultGene,
       bmr: calculated.bmr,
       isInbodyMeasured: false,
+      isGeneMeasured: false,
       tdee: calculated.tdee,
       targetCalories: calculated.targetCalories,
       targetP: calculated.targetP,
@@ -386,29 +395,44 @@ export default function App() {
       targetC: calculated.targetC,
       todayMeals: [],
       inbodyHistory: [],
-      adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${newUserName.trim()}様、ご登録ありがとうございます！「📸 InBody結果読み込み」ボタンから測定シートをスキャンしてカルテを完成させてください。`,
+      adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${newUserName.trim()}様、ご登録ありがとうございます！「InBody読み込み」および「遺伝子検査結果 (Excel)」をアップロードしてください。`,
     };
 
     setUsers((prev) => ({ ...prev, [newId]: newUserObj }));
     setSelectedUserId(newId);
     setNewUserName('');
     setIsAddUserModalOpen(false);
-    showToast(`「${newUserName.trim()} 様」を追加しました！続けてInBodyシートを撮影してください。`);
+    showToast(`「${newUserName.trim()} 様」を追加しました！続けてInBodyシートや遺伝子Excelを登録してください。`);
   };
 
-  const handleSaveGeneProfile = () => {
-    const typeNames: Record<GeneType, string> = {
-      lipid_risk: '脂質吸収過多・皮下脂肪タイプ',
-      carb_risk: '糖質内臓脂肪・インスリンリスクタイプ',
-      protein_risk: '蛋白分解・筋肉分解リスクタイプ',
-      micronutrient: '微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ',
-      exercise_resistant: '運動減量抵抗性タイプ',
-    };
+  // 🧬 Excel遺伝子検査結果ファイルの自動読み取り解析
+  const runGeneExcelScan = () => {
+    if (!geneExcelFile) return alert('遺伝子検査結果のExcelファイル（.xlsx/.xls）を選択してください');
+    setIsParsingExcel(true);
 
-    const updatedGene: GeneProfile = {
-      ...geneForm,
-      typeName: typeNames[geneForm.type],
-    };
+    setTimeout(() => {
+      setIsParsingExcel(false);
+
+      // Excelから自動抽出された遺伝子解析結果（シミュレーション）
+      const parsed: GeneProfile = {
+        type: 'lipid_risk',
+        typeName: '脂質吸収過多・皮下脂肪タイプ (F18%制限)',
+        folicAcidLow: true,
+        vitaminCLow: true,
+        ironLow: true,
+        zincLow: false,
+        leucineLow: false,
+        exerciseEffectLow: true,
+      };
+
+      setParsedGeneProfile(parsed);
+      showToast('遺伝子検査ExcelのAI解析が完了しました！');
+    }, 1200);
+  };
+
+  // 解析された遺伝子情報をカルテに記憶・自動PFC最適化保存
+  const saveGeneExcelToProfile = () => {
+    if (!parsedGeneProfile) return;
 
     const calculated = calculateLogicalTargetsWithHB(
       currentUser.gender,
@@ -420,7 +444,7 @@ export default function App() {
       currentUser.targetWeight,
       currentUser.targetMonths,
       currentUser.pal,
-      updatedGene,
+      parsedGeneProfile,
       currentUser.isInbodyMeasured ? currentUser.bmr : undefined
     );
 
@@ -428,16 +452,20 @@ export default function App() {
       ...prev,
       [selectedUserId]: {
         ...prev[selectedUserId],
-        geneProfile: updatedGene,
+        geneProfile: parsedGeneProfile,
+        isGeneMeasured: true,
         targetCalories: calculated.targetCalories,
         targetP: calculated.targetP,
         targetF: calculated.targetF,
         targetC: calculated.targetC,
+        adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${currentUser.name}様、遺伝子検査（chatGENE）Excelデータの連携が完了しました！\n「${parsedGeneProfile.typeName}」の体質に合わせ、PFCバランスを自動最適化設定いたしました。`,
       },
     }));
 
-    setIsGeneModalOpen(false);
-    showToast('遺伝子検査データ（chatGENE）に基づく設定を更新しました！');
+    setIsGeneExcelModalOpen(false);
+    setGeneExcelFile(null);
+    setParsedGeneProfile(null);
+    showToast('遺伝子検査Excelのデータをカルテに反映・保存しました！');
   };
 
   const handleSaveLogicalTargets = () => {
@@ -479,7 +507,6 @@ export default function App() {
     setTimeout(() => {
       setIsScanningInbody(false);
 
-      // AIがInBody用紙から自動検出した数値
       const parsed: InBodyRecord = {
         date: new Date().toISOString().split('T')[0],
         weight: currentUser.gender === 'male' ? 74.5 : 56.8,
@@ -600,7 +627,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-black text-slate-800 leading-tight">サクラ整骨院 遺伝子・InBody統合PFC管理</h1>
-              <p className="text-[10px] text-slate-500 font-medium">InBody自動読み込み ＋ chatGENE連動（スタッフ専用）</p>
+              <p className="text-[10px] text-slate-500 font-medium">InBody ＋ 遺伝子検査(Excel) 自動読み込み連動</p>
             </div>
           </div>
 
@@ -622,7 +649,6 @@ export default function App() {
                 onChange={(e) => {
                   setSelectedUserId(e.target.value);
                   setCalcForm(users[e.target.value]);
-                  setGeneForm(users[e.target.value].geneProfile);
                 }}
                 className="bg-transparent text-slate-800 text-xs font-bold py-1 pr-2 outline-none cursor-pointer"
               >
@@ -649,7 +675,12 @@ export default function App() {
                 </span>
                 {currentUser.isInbodyMeasured && (
                   <span className="text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-3 py-0.5 rounded-full flex items-center gap-1">
-                    <Database className="w-3 h-3 text-indigo-400" /> InBody実測連動済み
+                    <Database className="w-3 h-3 text-indigo-400" /> InBody実測済み
+                  </span>
+                )}
+                {currentUser.isGeneMeasured && (
+                  <span className="text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-3 py-0.5 rounded-full flex items-center gap-1">
+                    <FileSpreadsheet className="w-3 h-3 text-emerald-400" /> 遺伝子Excel適用済み
                   </span>
                 )}
               </div>
@@ -661,7 +692,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsInbodyModalOpen(true)}
-                className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs transition-all flex items-center gap-1.5 shadow-lg animate-pulse"
+                className="px-3.5 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 shadow"
               >
                 <Scan className="w-4 h-4 text-indigo-200" />
                 <span>📸 InBody結果読み込み</span>
@@ -669,14 +700,11 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() => {
-                  setGeneForm(currentUser.geneProfile);
-                  setIsGeneModalOpen(true);
-                }}
+                onClick={() => setIsGeneExcelModalOpen(true)}
                 className="px-3.5 py-2 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-all flex items-center gap-1.5 shadow"
               >
-                <Dna className="w-4 h-4 text-amber-200" />
-                <span>🧬 遺伝子検査データ設定</span>
+                <FileSpreadsheet className="w-4 h-4 text-amber-200" />
+                <span>🧬 遺伝子検査結果 (Excel)</span>
               </button>
 
               <button
@@ -865,7 +893,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* 👤 新規会員追加 モーダル（名前だけの超シンプル入力） */}
+      {/* 👤 新規会員追加 モーダル */}
       {isAddUserModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4">
@@ -894,7 +922,7 @@ export default function App() {
                 />
               </div>
               <p className="text-[11px] text-slate-500 leading-relaxed bg-emerald-50 p-3 rounded-xl border border-emerald-100">
-                💡 登録後、「📸 InBody結果読み込み」から用紙を撮影すると、体重・筋肉量・基礎代謝などの数値が自動入力されます。
+                💡 登録後、「InBody結果読み込み」や「遺伝子検査結果 (Excel)」をアップロードすると、数値や遺伝子タイプが自動でカルテに反映されます。
               </p>
             </div>
 
@@ -914,6 +942,106 @@ export default function App() {
                 登録して完了
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🧬 遺伝子検査結果 (Excel) 自動読み込み モーダル */}
+      {isGeneExcelModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="w-6 h-6 text-amber-600" />
+                <div>
+                  <h3 className="font-black text-slate-800 text-base">遺伝子検査結果 (Excel) 自動解析</h3>
+                  <p className="text-[10px] text-slate-500">Excelファイルをドラッグ＆ドロップで選択・全自動判定</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setIsGeneExcelModalOpen(false)} className="p-1 rounded-full text-slate-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <input
+                type="file"
+                accept=".xlsx, .xls"
+                ref={excelFileInputRef}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) setGeneExcelFile(file);
+                }}
+                className="hidden"
+              />
+
+              <div
+                onClick={() => excelFileInputRef.current?.click()}
+                className="border-2 border-dashed border-amber-300 bg-amber-50/40 rounded-2xl p-6 text-center cursor-pointer hover:border-amber-500 min-h-[150px] flex items-center justify-center transition-all"
+              >
+                {geneExcelFile ? (
+                  <div className="space-y-1">
+                    <FileSpreadsheet className="w-10 h-10 text-amber-600 mx-auto" />
+                    <p className="text-xs font-black text-slate-800">{geneExcelFile.name}</p>
+                    <p className="text-[10px] text-amber-600 font-bold">ファイル読み込み完了</p>
+                  </div>
+                ) : (
+                  <div>
+                    <Upload className="w-9 h-9 text-amber-500 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-slate-700">遺伝子検査のExcelファイル（.xlsx/.xls）を選択</p>
+                    <p className="text-[10px] text-slate-400 mt-1">※chatGENE等の解析結果データを自動解析します</p>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={runGeneExcelScan}
+                disabled={isParsingExcel || !geneExcelFile}
+                className={`w-full py-3.5 rounded-2xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 ${
+                  geneExcelFile ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-slate-200 text-slate-400'
+                }`}
+              >
+                <Sparkles className="w-4 h-4 text-amber-200" />
+                <span>{isParsingExcel ? 'Excelデータを自動解析中...' : 'Excelファイルを自動解析'}</span>
+              </button>
+            </div>
+
+            {parsedGeneProfile && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-amber-200/80 pb-2">
+                  <span className="text-xs font-black text-amber-900 flex items-center gap-1">
+                    <CheckCircle2 className="w-4 h-4 text-amber-600" /> Excel解析・自動判定成功
+                  </span>
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <div className="bg-white p-3 rounded-xl border border-amber-100">
+                    <span className="text-[10px] text-slate-500 block font-bold">判定された主リスクタイプ</span>
+                    <strong className="text-sm text-amber-800 font-black">{parsedGeneProfile.typeName}</strong>
+                  </div>
+
+                  <div className="bg-white p-3 rounded-xl border border-amber-100 space-y-1">
+                    <span className="text-[10px] text-slate-500 block font-bold">検出された栄養素代謝リスク</span>
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {parsedGeneProfile.folicAcidLow && <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] font-bold">葉酸濃度 低</span>}
+                      {parsedGeneProfile.ironLow && <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] font-bold">鉄分濃度 低</span>}
+                      {parsedGeneProfile.vitaminCLow && <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-[10px] font-bold">ビタミンC濃度 低</span>}
+                      {parsedGeneProfile.exerciseEffectLow && <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded text-[10px] font-bold">運動減量効果 低</span>}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={saveGeneExcelToProfile}
+                  className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Database className="w-4 h-4 text-emerald-400" />
+                  <span>この解析結果でカルテ＆PFCを自動最適化保存</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1017,116 +1145,6 @@ export default function App() {
                 </button>
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* 🧬 遺伝子検査データ設定 モーダル */}
-      {isGeneModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Dna className="w-5 h-5 text-amber-600" />
-                <div>
-                  <h3 className="font-black text-slate-800 text-base">{currentUser.name} 様 遺伝子検査設定</h3>
-                  <p className="text-[10px] text-slate-500">chatGENEレポート項目に合わせたリスク登録</p>
-                </div>
-              </div>
-              <button type="button" onClick={() => setIsGeneModalOpen(false)} className="p-1 rounded-full text-slate-400">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">主たる肥満・代謝遺伝子タイプ</label>
-                <select
-                  value={geneForm.type}
-                  onChange={(e) => setGeneForm({ ...geneForm, type: e.target.value as GeneType })}
-                  className="w-full p-2.5 border border-slate-300 rounded-xl font-bold bg-slate-50"
-                >
-                  <option value="lipid_risk">① 脂質吸収過多・皮下脂肪タイプ (F制限18%)</option>
-                  <option value="carb_risk">② 糖質内臓脂肪・インスリンリスクタイプ (C制限40%)</option>
-                  <option value="protein_risk">③ 蛋白分解・筋肉分解リスクタイプ (P強化35%)</option>
-                  <option value="micronutrient">④ 微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ</option>
-                  <option value="exercise_resistant">⑤ 運動減量抵抗性タイプ (食事9割徹底)</option>
-                </select>
-              </div>
-
-              <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-2xl space-y-2">
-                <span className="font-black text-amber-900 block border-b border-amber-200 pb-1">
-                  chatGENE 栄養素・代謝リスクチェック項目
-                </span>
-
-                <label className="flex items-center gap-2 text-slate-700 font-bold cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={geneForm.folicAcidLow}
-                    onChange={(e) => setGeneForm({ ...geneForm, folicAcidLow: e.target.checked })}
-                    className="w-4 h-4 text-amber-600 rounded"
-                  />
-                  <span>葉酸（ビタミンB9）濃度「低」</span>
-                </label>
-
-                <label className="flex items-center gap-2 text-slate-700 font-bold cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={geneForm.ironLow}
-                    onChange={(e) => setGeneForm({ ...geneForm, ironLow: e.target.checked })}
-                    className="w-4 h-4 text-amber-600 rounded"
-                  />
-                  <span>鉄分（フェリチン）濃度「低」</span>
-                </label>
-
-                <label className="flex items-center gap-2 text-slate-700 font-bold cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={geneForm.vitaminCLow}
-                    onChange={(e) => setGeneForm({ ...geneForm, vitaminCLow: e.target.checked })}
-                    className="w-4 h-4 text-amber-600 rounded"
-                  />
-                  <span>ビタミンC濃度「低」</span>
-                </label>
-
-                <label className="flex items-center gap-2 text-slate-700 font-bold cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={geneForm.leucineLow}
-                    onChange={(e) => setGeneForm({ ...geneForm, leucineLow: e.target.checked })}
-                    className="w-4 h-4 text-amber-600 rounded"
-                  />
-                  <span>ロイシン（BCAA）濃度「低」</span>
-                </label>
-
-                <label className="flex items-center gap-2 text-slate-700 font-bold cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={geneForm.exerciseEffectLow}
-                    onChange={(e) => setGeneForm({ ...geneForm, exerciseEffectLow: e.target.checked })}
-                    className="w-4 h-4 text-amber-600 rounded"
-                  />
-                  <span>運動による減量効果「低」</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsGeneModalOpen(false)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-600"
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveGeneProfile}
-                className="flex-1 py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold shadow-sm"
-              >
-                設定保存＆PFC最適化
-              </button>
-            </div>
           </div>
         </div>
       )}
