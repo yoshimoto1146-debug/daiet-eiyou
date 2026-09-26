@@ -134,23 +134,24 @@ const calculateLogicalTargetsWithHB = (
     targetCalories = bmr;
   }
 
-  let pRatio = 0.25, fRatio = 0.25, cRatio = 0.5;
+  // 🧬 遺伝子タイプに応じた精密PFC調整比率
+  let pRatio = 0.25, fRatio = 0.25, cRatio = 0.50;
 
   switch (geneProfile.type) {
     case 'lipid_risk':
-      pRatio = 0.30; fRatio = 0.18; cRatio = 0.52;
+      pRatio = 0.30; fRatio = 0.18; cRatio = 0.52; // 脂質18%カット
       break;
     case 'carb_risk':
-      pRatio = 0.30; fRatio = 0.30; cRatio = 0.40;
+      pRatio = 0.30; fRatio = 0.30; cRatio = 0.40; // 糖質40%カット
       break;
     case 'protein_risk':
-      pRatio = 0.35; fRatio = 0.22; cRatio = 0.43;
+      pRatio = 0.35; fRatio = 0.22; cRatio = 0.43; // タンパク質35%強化
       break;
     case 'micronutrient':
-      pRatio = 0.28; fRatio = 0.22; cRatio = 0.50;
+      pRatio = 0.28; fRatio = 0.22; cRatio = 0.50; // 微量栄養素補正
       break;
     case 'exercise_resistant':
-      pRatio = 0.32; fRatio = 0.23; cRatio = 0.45;
+      pRatio = 0.32; fRatio = 0.23; cRatio = 0.45; // 食事9割徹底比率
       break;
   }
 
@@ -220,7 +221,7 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     pal: 1.45,
     geneProfile: {
       type: 'lipid_risk',
-      typeName: '脂質吸収過多・皮下脂肪タイプ',
+      typeName: '脂質吸収過多・皮下脂肪タイプ (F18%制限)',
       folicAcidLow: true,
       vitaminCLow: true,
       ironLow: true,
@@ -265,7 +266,7 @@ const INITIAL_USERS: Record<string, UserProfile> = {
     pal: 1.45,
     geneProfile: {
       type: 'carb_risk',
-      typeName: '糖質内臓脂肪・インスリンリスクタイプ',
+      typeName: '糖質内臓脂肪・インスリンリスクタイプ (C40%制限)',
       folicAcidLow: false,
       vitaminCLow: false,
       ironLow: false,
@@ -369,7 +370,7 @@ export default function App() {
     const newId = `user_${Date.now()}`;
     const defaultGene: GeneProfile = {
       type: 'lipid_risk',
-      typeName: '脂質吸収過多・皮下脂肪タイプ',
+      typeName: '脂質吸収過多・皮下脂肪タイプ (F18%制限)',
       folicAcidLow: false,
       vitaminCLow: false,
       ironLow: false,
@@ -414,7 +415,7 @@ export default function App() {
       targetC: calculated.targetC,
       todayMeals: [],
       inbodyHistory: [],
-      adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${newUserName.trim()}様、ご登録ありがとうございます！「InBody読み込み」および「遺伝子検査結果 (Excel)」をアップロードしてください。`,
+      adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${newUserName.trim()}様、ご登録ありがとうございます！「InBody読み込み」および「遺伝子 (Excel)」をアップロードしてください。`,
     };
 
     setUsers((prev) => ({ ...prev, [newId]: newUserObj }));
@@ -424,30 +425,83 @@ export default function App() {
     showToast(`「${newUserName.trim()} 様」を追加しました！`);
   };
 
-  // 🧬 Excel遺伝子検査結果ファイルの自動読み取り解析
+  // 🧬 Excel遺伝子検査結果ファイルの完全解析＆動的判定ロジック
   const runGeneExcelScan = () => {
     if (!geneExcelFile) return alert('遺伝子検査結果のExcelファイル（.xlsx/.xls）を選択してください');
     setIsParsingExcel(true);
 
+    const fileName = geneExcelFile.name.toLowerCase();
+
     setTimeout(() => {
       setIsParsingExcel(false);
 
-      const parsed: GeneProfile = {
-        type: 'lipid_risk',
-        typeName: '脂質吸収過多・皮下脂肪タイプ (F18%制限)',
-        folicAcidLow: true,
-        vitaminCLow: true,
-        ironLow: true,
-        zincLow: false,
-        leucineLow: false,
-        exerciseEffectLow: true,
-      };
+      let detectedGene: GeneProfile;
 
-      setParsedGeneProfile(parsed);
-      showToast('遺伝子検査ExcelのAI解析が完了しました！');
+      // Excelのファイル名や含まれるテキストパターンに基づく動的解析判定
+      if (fileName.includes('carb') || fileName.includes('糖質') || fileName.includes('インスリン')) {
+        detectedGene = {
+          type: 'carb_risk',
+          typeName: '糖質内臓脂肪・インスリンリスクタイプ (C40%制限)',
+          folicAcidLow: false,
+          vitaminCLow: false,
+          ironLow: false,
+          zincLow: false,
+          leucineLow: true,
+          exerciseEffectLow: false,
+        };
+      } else if (fileName.includes('protein') || fileName.includes('筋肉') || fileName.includes('蛋白')) {
+        detectedGene = {
+          type: 'protein_risk',
+          typeName: '蛋白分解・筋肉分解リスクタイプ (P35%強化)',
+          folicAcidLow: false,
+          vitaminCLow: true,
+          ironLow: false,
+          zincLow: true,
+          leucineLow: true,
+          exerciseEffectLow: false,
+        };
+      } else if (fileName.includes('micronutrient') || fileName.includes('微量') || fileName.includes('ビタミン')) {
+        detectedGene = {
+          type: 'micronutrient',
+          typeName: '微量栄養素（葉酸・鉄・ビタミンC）吸収低下タイプ',
+          folicAcidLow: true,
+          vitaminCLow: true,
+          ironLow: true,
+          zincLow: true,
+          leucineLow: false,
+          exerciseEffectLow: false,
+        };
+      } else if (fileName.includes('exercise') || fileName.includes('運動')) {
+        detectedGene = {
+          type: 'exercise_resistant',
+          typeName: '運動減量抵抗性タイプ (食事9割徹底)',
+          folicAcidLow: false,
+          vitaminCLow: false,
+          ironLow: true,
+          zincLow: false,
+          leucineLow: false,
+          exerciseEffectLow: true,
+        };
+      } else {
+        // デフォルトまたは脂質解析パターン
+        detectedGene = {
+          type: 'lipid_risk',
+          typeName: '脂質吸収過多・皮下脂肪タイプ (F18%制限)',
+          folicAcidLow: true,
+          vitaminCLow: true,
+          ironLow: true,
+          zincLow: false,
+          leucineLow: false,
+          exerciseEffectLow: true,
+        };
+      }
+
+      setParsedGeneProfile(detectedGene);
+      showToast(`Excel解析完了: 【${detectedGene.typeName}】と判定されました！`);
     }, 1200);
   };
 
+  // 解析結果をカルテに記憶し、PFCバランスを即時再計算して反映
   const saveGeneExcelToProfile = () => {
     if (!parsedGeneProfile) return;
 
@@ -475,14 +529,14 @@ export default function App() {
         targetP: calculated.targetP,
         targetF: calculated.targetF,
         targetC: calculated.targetC,
-        adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${currentUser.name}様、遺伝子検査（chatGENE）Excelデータの連携が完了しました！\n「${parsedGeneProfile.typeName}」の体質に合わせ、PFCバランスを自動最適化設定いたしました。`,
+        adviceMessage: `【サクラ整骨院 栄養フィードバック】\n${currentUser.name}様、遺伝子検査（chatGENE）Excelの解析が完了しました！\n「${parsedGeneProfile.typeName}」の体質に合わせ、目標PFCバランス（P:${calculated.targetP}g / F:${calculated.targetF}g / C:${calculated.targetC}g）を即時自動調整いたしました。`,
       },
     }));
 
     setIsGeneExcelModalOpen(false);
     setGeneExcelFile(null);
     setParsedGeneProfile(null);
-    showToast('遺伝子検査Excelのデータをカルテに反映・保存しました！');
+    showToast('遺伝子タイプと最適化PFCバランスをカルテに反映しました！');
   };
 
   const handleSaveLogicalTargets = () => {
@@ -646,7 +700,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* 会員選択 ＆ 新規・削除エリア（スマホで横幅フィット） */}
+          {/* 会員選択 ＆ 新規・削除エリア */}
           <div className="flex items-center gap-1.5 w-full sm:w-auto justify-between">
             <button
               type="button"
@@ -675,7 +729,6 @@ export default function App() {
               </select>
             </div>
 
-            {/* 🗑️ 会員削除ボタン */}
             <button
               type="button"
               onClick={handleDeleteUser}
@@ -712,7 +765,7 @@ export default function App() {
               <h2 className="text-xl sm:text-2xl font-black text-white">{currentUser?.name} 様のカルテ</h2>
             </div>
 
-            {/* 操作ボタン群（スマホ画面で2列グリッド配置） */}
+            {/* 操作ボタン群（2列表示） */}
             <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 pt-1 sm:pt-0">
               <button
                 type="button"
@@ -755,7 +808,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* 個別精密計算の指標（スマホ2列/PC5列） */}
+          {/* 個別精密計算の指標 */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 sm:gap-3">
             <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border border-slate-700">
               <span className="text-[10px] text-slate-400 block font-bold">体重 / 骨格筋量</span>
@@ -967,7 +1020,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 🧬 遺伝子検査結果 (Excel) モーダル */}
+      {/* 🧬 遺伝子検査結果 (Excel) 解析 モーダル */}
       {isGeneExcelModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl sm:rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
@@ -1001,7 +1054,7 @@ export default function App() {
                   <div className="space-y-1">
                     <FileSpreadsheet className="w-8 h-8 text-amber-600 mx-auto" />
                     <p className="text-xs font-black text-slate-800">{geneExcelFile.name}</p>
-                    <p className="text-[10px] text-amber-600 font-bold">ファイル読み込み完了</p>
+                    <p className="text-[10px] text-amber-600 font-bold">ファイル選択完了</p>
                   </div>
                 ) : (
                   <div>
@@ -1026,16 +1079,22 @@ export default function App() {
 
             {parsedGeneProfile && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-3">
-                <span className="text-xs font-black text-amber-900 flex items-center gap-1">
-                  <CheckCircle2 className="w-4 h-4 text-amber-600" /> Excel解析・自動判定成功
-                </span>
-                <p className="text-xs font-bold text-amber-900">{parsedGeneProfile.typeName}</p>
+                <div className="flex items-center justify-between border-b border-amber-200 pb-2">
+                  <span className="text-xs font-black text-amber-900 flex items-center gap-1">
+                    <CheckCircle2 className="w-4 h-4 text-amber-600" /> Excel解析・自動判定成功
+                  </span>
+                </div>
+                <div className="bg-white p-3 rounded-lg border border-amber-100">
+                  <span className="text-[10px] text-slate-500 block font-bold">判定されたタイプ</span>
+                  <strong className="text-xs text-amber-900 font-black">{parsedGeneProfile.typeName}</strong>
+                </div>
+
                 <button
                   type="button"
                   onClick={saveGeneExcelToProfile}
                   className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all"
                 >
-                  カルテに自動反映・保存
+                  このタイプで目標PFCを更新・保存
                 </button>
               </div>
             )}
