@@ -24,15 +24,15 @@ interface MealRecord {
   createdAt: string;
 }
 
-// システムプロンプト（時間帯による数値変動を遮断する厳格ルール）
+// システムプロンプト（時間帯・文脈による数値変動を完全遮断）
 const SYSTEM_INSTRUCTION = `
-あなたはプロの管理栄養士および分子栄養学の専門家です。
-ユーザーから渡された食事内容テキストを分析し、カロリーとPFC（タンパク質・脂質・炭水化物）のバランスを算出してください。
+あなたはプロの管理栄養士です。
+ユーザーから渡された料理・食事内容テキストのみを元に、客観的な標準1人前のカロリーとPFC（タンパク質・脂質・炭水化物）を算出してください。
 
-【厳格なルール】
-1. 食事の摂取タイミング（朝食・昼食・夕食・間食など）や時間帯情報は、カロリーおよびPFCの計算結果に一切影響させてはなりません。
-2. 同じ食事内容であれば、朝・昼・夜どの時間帯であっても、常に同一の標準的な栄養数値を算出してください。
-3. 一般的な一人前の標準的な量を基準とし、客観的かつ再現性のある数値を出力してください。
+【絶対ルール】
+1. 時間帯（朝食、昼食、夕食、間食、夜食など）や摂取タイミングの文脈は一切考慮しないでください。
+2. 同じ料理・食事内容のテキストに対しては、いつ・どのタイミングで入力されたとしても、必ず毎回【完全に同一の数値】を出力してください。
+3. 一般的な標準1人前（例: 生姜焼き定食なら豚ロース肉・キャベツ・ご飯普通盛り・味噌汁等）を基準とし、一貫性のある数値を返してください。
 `;
 
 // レスポンスのJSON構造定義
@@ -41,7 +41,7 @@ const mealAnalysisSchema = {
   properties: {
     mealName: {
       type: SchemaType.STRING,
-      description: "推定される標準的な料理名",
+      description: "標準的な料理名",
     },
     calories: {
       type: SchemaType.NUMBER,
@@ -61,7 +61,7 @@ const mealAnalysisSchema = {
     },
     description: {
       type: SchemaType.STRING,
-      description: "食材や内訳の簡潔な補足説明",
+      description: "内訳や成分の簡潔な補足説明",
     },
   },
   required: ["mealName", "calories", "protein", "fat", "carbs"],
@@ -87,6 +87,11 @@ export default function App() {
         throw new Error('VITE_GEMINI_API_KEY が設定されていません。');
       }
 
+      // 入力文字列の整形（時間帯や区分の表記があれば徹底排除）
+      const cleanedInput = inputText
+        .replace(/^(朝食|昼食|夕食|夜食|間食|朝|昼|夜)[:：\s]*/g, '')
+        .trim();
+
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({
         model: 'gemini-1.5-flash',
@@ -94,30 +99,26 @@ export default function App() {
         generationConfig: {
           responseMimeType: 'application/json',
           responseSchema: mealAnalysisSchema,
-          temperature: 0.1, // ランダム性を極力排除して一貫性を確保
+          temperature: 0.0, // 完全固定（ランダム性を完全に排除）
         },
       });
 
-      // 入力文字列から時間帯（朝・昼・夜等）のプレフィックスを除去し、純粋な料理名のみを抽出
-      const cleanedInput = inputText
-        .replace(/^(朝食|昼食|夕食|夜食|間食|朝|昼|夜)[:：\s]*/, '')
-        .trim();
-
-      const userPrompt = `以下の食事内容のカロリーおよびPFCバランスを分析してください。\n食事内容: ${cleanedInput}`;
+      // AIへ送るプロンプトには料理名のみを渡す（時間帯区分は一切含めない）
+      const userPrompt = `料理名: ${cleanedInput}`;
 
       const result = await model.generateContent(userPrompt);
       const responseText = result.response.text();
       const parsedData: MealAnalysisResult = JSON.parse(responseText);
 
-      // レコードとして保存（時間帯タグは保存用に付与し、AI計算には影響させない）
+      // レコードとして保存（mealTypeはアプリの保存カテゴリとしてのみ利用し、計算には一切関与させない）
       const newRecord: MealRecord = {
         id: Date.now().toString(),
         mealType,
         mealName: parsedData.mealName || cleanedInput,
-        calories: parsedData.calories,
-        protein: parsedData.protein,
-        fat: parsedData.fat,
-        carbs: parsedData.carbs,
+        calories: Math.round(parsedData.calories),
+        protein: Math.round(parsedData.protein * 10) / 10,
+        fat: Math.round(parsedData.fat * 10) / 10,
+        carbs: Math.round(parsedData.carbs * 10) / 10,
         description: parsedData.description,
         createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
