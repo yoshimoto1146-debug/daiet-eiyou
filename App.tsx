@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 
 // AI解析用の型定義
@@ -99,18 +99,18 @@ export default function App() {
         generationConfig: {
           responseMimeType: 'application/json',
           responseSchema: mealAnalysisSchema,
-          temperature: 0.0, // 完全固定（ランダム性を完全に排除）
+          temperature: 0.0, // 完全固定（ランダム性を完全排除）
         },
       });
 
-      // AIへ送るプロンプトには料理名のみを渡す（時間帯区分は一切含めない）
+      // AIへ送るプロンプトには料理名のみを渡す
       const userPrompt = `料理名: ${cleanedInput}`;
 
       const result = await model.generateContent(userPrompt);
       const responseText = result.response.text();
       const parsedData: MealAnalysisResult = JSON.parse(responseText);
 
-      // レコードとして保存（mealTypeはアプリの保存カテゴリとしてのみ利用し、計算には一切関与させない）
+      // レコードとして保存
       const newRecord: MealRecord = {
         id: Date.now().toString(),
         mealType,
